@@ -1,0 +1,5 @@
+{
+  "yaml.schemas": {
+    "./parser/spec/domain.schema.json": "**/domain.yaml"
+  }
+}

@@ -1,0 +1,180 @@
+project:
+  name: ECommerce Platform
+  description: Modern e-commerce system with advanced features
+  version: 1.0.0
+  multi_tenancy:
+    enabled: true
+    mode: column
+
+database: postgresql
+auth: jwt
+api_style: rest
+
+enums:
+  OrderStatus:
+    - PENDING
+    - PROCESSING
+    - SHIPPED
+    - DELIVERED
+    - CANCELLED
+  
+  ProductStatus:
+    - DRAFT
+    - PUBLISHED
+    - ARCHIVED
+  UserRole:
+    - Admin
+    - Editor
+    - Customer
+    - Guest
+
+  DocStatus:
+    - Draft
+    - Review
+    - Published
+    - Archived
+
+entities:
+  User:
+    features: [audit, soft_delete]
+    fields:
+      id: uuid [primary]
+      email: string [required, unique, email]
+      password: string [required, hidden]
+      firstName: string [required, min:2, max:50]
+      lastName: string [required, min:2, max:50]
+      avatar: string [optional, url]
+      isActive: boolean [default:true]
+      role: enum(UserRole) [default:customer]
+    
+    permissions:
+      read: [Admin, "*"]
+      create: ["*"]
+      update: ["@Owner", Admin]
+      delete: [Admin]
+
+  Product:
+    features: [audit, soft_delete, optimistic_lock]
+    fields:
+      id: uuid [primary]
+      title: string [required, min:5, max:200]
+      description: text [optional]
+      price: decimal [required, gte:0]
+      stock: int [required, default:0]
+      status: enum(ProductStatus) [default:DRAFT]
+      categoryId: relation(Category) [optional, on_delete:set_null]
+      supplierId: relation(User) [required, on_delete:restrict]
+      tags: relation(Tag) [many]
+      metadata: json [optional]
+    
+    indexes:
+      - fields: [status, categoryId]
+        type: btree
+      - fields: [title]
+        type: btree
+    
+    seed:
+      - { id: "550e8400-e29b-41d4-a716-446655440000", title: "Sample Product", price: "99.99", stock: 100, status: "DRAFT" }
+
+  Category:
+    features: [audit]
+    fields:
+      id: uuid [primary]
+      name: string [required, unique, min:3, max:100]
+      description: string [optional, max:500]
+      parentId: relation(Category) [optional, on_delete:set_null]
+      slug: string [required, unique, regex:"^[a-z0-9-]+$"]
+      isActive: boolean [default:true]
+
+  Order:
+    features: [audit_log, soft_delete]
+    fields:
+      id: uuid [primary]
+      orderNumber: string [required, unique]
+      userId: relation(User) [required, on_delete:restrict]
+      status: enum(OrderStatus) [default:PENDING]
+      totalAmount: decimal [required, gte:0]
+      notes: string [optional, max:1000]
+      shippingAddress: json [optional]
+      items: relation(OrderItem) [many]
+    
+    permissions:
+      read: [Admin, "@Owner"]
+      create: [User]
+      update: ["@Owner"]
+      delete: [Admin]
+
+  OrderItem:
+    features: [audit]
+    fields:
+      id: uuid [primary]
+      orderId: relation(Order) [required, on_delete:cascade]
+      productId: relation(Product) [required, on_delete:restrict]
+      quantity: int [required, gte:1]
+      unitPrice: decimal [required, gte:0]
+      discount: decimal [optional, default:0, gte:0, lt:100]
+
+  Tag:
+    features: [audit]
+    fields:
+      id: uuid [primary]
+      name: string [required, unique, min:2, max:50]
+      slug: string [required, unique, regex:"^[a-z0-9-]+$"]
+      description: string [optional, max:200]
+
+  Review:
+    features: [audit_log, soft_delete]
+    fields:
+      id: uuid [primary]
+      productId: relation(Product) [required, on_delete:cascade]
+      userId: relation(User) [required, on_delete:cascade]
+      rating: int [required, gte:1, lt:6]
+      title: string [required, min:5, max:100]
+      content: text [optional]
+      isVerifiedPurchase: boolean [default:false]
+      helpful: int [default:0]
+    
+    indexes:
+      - fields: [productId, rating]
+      - fields: [userId, createdAt]
+    
+    permissions:
+      read: ["*"]
+      create: [User]
+      update: ["@Owner", Admin]
+      delete: [Admin, "@Owner"]
+
+  Document:
+    features: [audit_log, soft_delete, optimistic_lock]
+    fields:
+      id: uuid [primary]
+      title: string [required, min:5, max:255]
+      content: text
+      status: enum(DocStatus) [default:Draft]
+      folderId: relation(Folder) [optional, on_delete:set_null]
+      authorId: relation(User) [required, on_delete:restrict]
+      isPublished: boolean [default:false]
+      internalNotes: string [hidden, optional]
+    
+    permissions:
+      read: [Admin, "@Owner"]
+      read_public: "condition(isPublished == true)"
+      create: [User, Admin]
+      update: ["@Owner", Admin]
+      delete: [Admin]
+
+  Folder:
+    features: [audit]
+    fields:
+      id: uuid [primary]
+      name: string [required, min:2, max:200]
+      parentId: relation(Folder) [optional, on_delete:set_null]
+      slug: string [required, unique, regex:"^[a-z0-9-]+$"]
+      isActive: boolean [default:true]
+      ownerId: relation(User) [optional, on_delete:restrict]
+
+    permissions:
+      read: [Admin, "*"]
+      create: [Admin]
+      update: [Admin]
+      delete: [Admin]

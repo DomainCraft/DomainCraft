@@ -1,0 +1,50 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    name: Build binaries, schema, and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+          cache-dependency-path: parser/go.sum
+
+      - name: Build Linux binary
+        working-directory: parser
+        run: |
+          mkdir -p ../release
+          GOOS=linux GOARCH=amd64 go build -o ../release/domaincraft-linux-amd64 ./cmd/parser
+
+      - name: Build macOS binary
+        working-directory: parser
+        run: |
+          mkdir -p ../release
+          GOOS=darwin GOARCH=amd64 go build -o ../release/domaincraft-darwin-amd64 ./cmd/parser
+
+      - name: Build Windows binary
+        working-directory: parser
+        run: |
+          mkdir -p ../release
+          GOOS=windows GOARCH=amd64 go build -o ../release/domaincraft-windows-amd64.exe ./cmd/parser
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/domaincraft-linux-amd64
+            release/domaincraft-darwin-amd64
+            release/domaincraft-windows-amd64.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

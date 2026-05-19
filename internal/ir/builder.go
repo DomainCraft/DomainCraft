@@ -1,0 +1,343 @@
+package ir
+
+import (
+	"fmt"
+	"strings"
+	"unicode"
+
+	"domaincraft/internal/parser"
+)
+
+// Builder converts ParsedSchema into IRProject.
+type Builder struct{}
+
+func NewBuilder() *Builder {
+	return &Builder{}
+}
+
+func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
+	if schema == nil {
+		return nil, fmt.Errorf("parsed schema is nil")
+	}
+
+	irProject := &IRProject{
+		Name:     schema.Project.Name,
+		Database: schema.Database,
+		Auth:     schema.Auth,
+		APIStyle: schema.APIStyle,
+		Enums:    schema.Enums,
+		Entities: make([]IREntity, 0, len(schema.Entities)),
+	}
+
+	entityIndex := make(map[string]*IREntity, len(schema.Entities))
+	for _, entityName := range schema.EntityOrder {
+		sourceEntity := schema.Entities[entityName]
+		if sourceEntity == nil {
+			continue
+		}
+
+		irEntity := IREntity{
+			Name:              sourceEntity.Name,
+			NamePlural:        sourceEntity.NamePlural,
+			HasAudit:          sourceEntity.Features["audit"] || sourceEntity.Features["audit_log"],
+			HasSoftDelete:     sourceEntity.Features["soft_delete"],
+			HasOptimisticLock: sourceEntity.Features["optimistic_lock"],
+			Fields:            make([]IRField, 0, len(sourceEntity.FieldOrder)),
+			RelationsOut:      make([]IRRelation, 0),
+			RelationsIn:       make([]IRRelation, 0),
+			Indexes:           make([]IRIndex, 0, len(sourceEntity.Indexes)),
+			Seed:              sourceEntity.Seed,
+			Permissions:       convertPermissions(sourceEntity.Permissions),
+		}
+
+		for _, fieldName := range sourceEntity.FieldOrder {
+			field := sourceEntity.Fields[fieldName]
+			if field == nil {
+				continue
+			}
+
+			irEntity.Fields = append(irEntity.Fields, IRField{
+				Name:           field.Name,
+				DatabaseType:   resolveDatabaseType(schema.Database, field, schema),
+				IsPrimary:      field.IsPrimary,
+				IsNullable:     field.IsOptional,
+				IsUnique:       field.IsUnique,
+				IsHidden:       field.IsHidden,
+				IsRelation:     field.IsRelation,
+				IsMany:         field.IsMany,
+				RelationTarget: field.RelationTarget,
+				DefaultValue:   field.DefaultValue,
+				DefaultIsFunc:  field.DefaultIsFunc,
+				Validations:    convertValidations(field.Validations),
+			})
+		}
+
+		for _, idx := range sourceEntity.Indexes {
+			irEntity.Indexes = append(irEntity.Indexes, IRIndex{
+				Name:   idx.Name,
+				Fields: append([]string(nil), idx.Fields...),
+				Type:   idx.Type,
+				Sort:   append([]string(nil), idx.Sort...),
+				Unique: idx.Unique,
+			})
+		}
+
+		irProject.Entities = append(irProject.Entities, irEntity)
+		entityIndex[irEntity.Name] = &irProject.Entities[len(irProject.Entities)-1]
+	}
+
+	for i := range irProject.Entities {
+		irEntity := &irProject.Entities[i]
+		sourceEntity := schema.Entities[irEntity.Name]
+		if sourceEntity == nil {
+			continue
+		}
+
+		for _, fieldName := range sourceEntity.FieldOrder {
+			field := sourceEntity.Fields[fieldName]
+			if field == nil || !field.IsRelation {
+				continue
+			}
+
+			targetEntity, ok := entityIndex[field.RelationTarget]
+			if !ok {
+				return nil, fmt.Errorf("relation target '%s' referenced by '%s.%s' does not exist", field.RelationTarget, irEntity.Name, field.Name)
+			}
+
+			relationType := field.RelationType
+			if relationType == "" {
+				relationType = "many-to-one"
+				if field.IsUnique {
+					relationType = "one-to-one"
+				}
+				if field.IsMany {
+					relationType = "many-to-many"
+				}
+			}
+
+			relation := IRRelation{
+				FieldName:        field.Name,
+				TargetEntity:     targetEntity,
+				NavigationName:   navigationName(field),
+				InverseNavName:   pluralize(irEntity.Name),
+				OnDeleteBehavior: normalizeDeleteBehavior(field.OnDelete),
+				IsNullable:       field.IsOptional,
+				IsMany:           field.IsMany,
+				RelationType:     relationType,
+			}
+
+			irEntity.RelationsOut = append(irEntity.RelationsOut, relation)
+
+			// Skip adding inverse RelationsIn if the target already has a forward IsMany
+			// relation to this entity (avoids duplicate ICollection navigations)
+			hasForwardMany := false
+			for _, out := range targetEntity.RelationsOut {
+				if out.IsMany && out.TargetEntity != nil && out.TargetEntity.Name == irEntity.Name {
+					hasForwardMany = true
+					break
+				}
+			}
+			if !hasForwardMany {
+			targetEntity.RelationsIn = append(targetEntity.RelationsIn, IRRelation{
+				FieldName:        relation.FieldName,
+				TargetEntity:     irEntity,
+				NavigationName:   relation.NavigationName,
+				InverseNavName:   relation.InverseNavName,
+				OnDeleteBehavior: relation.OnDeleteBehavior,
+				IsMany:           !relation.IsMany, // Inverse cardinality: one-to-many becomes many-to-one on the target
+				RelationType:     relation.RelationType,
+			})
+			}
+		}
+	}
+
+	return irProject, nil
+}
+
+func convertValidations(source map[string]string) []IRValidation {
+	if len(source) == 0 {
+		return nil
+	}
+	result := make([]IRValidation, 0, len(source))
+	for key, value := range source {
+		result = append(result, IRValidation{Name: key, Value: value})
+	}
+	return result
+}
+
+func convertPermissions(source *parser.ParsedPermissions) *IRPermissions {
+	if source == nil {
+		return nil
+	}
+	return &IRPermissions{
+		Read:       append([]string(nil), source.Read...),
+		Create:     append([]string(nil), source.Create...),
+		Update:     append([]string(nil), source.Update...),
+		Delete:     append([]string(nil), source.Delete...),
+		ReadPublic: source.ReadPublic,
+	}
+}
+
+func resolveDatabaseType(database string, field *parser.ParsedField, schema *parser.ParsedSchema) string {
+	if field == nil || field.FieldDefinition == nil {
+		return "string"
+	}
+
+	if field.IsRelation {
+		if target, ok := schema.Entities[field.RelationTarget]; ok {
+			for _, targetFieldName := range target.FieldOrder {
+				targetField := target.Fields[targetFieldName]
+				if targetField != nil && targetField.IsPrimary {
+					return resolveDatabaseType(database, targetField, schema)
+				}
+			}
+		}
+		return "string"
+	}
+
+	if field.Type == "array" {
+		return resolveArrayType(database, field.TargetType)
+	}
+
+	if field.Type == "enum" {
+		return "string"
+	}
+
+	switch field.Type {
+	case "string", "text", "uuid", "json", "jsonb":
+		return "string"
+	case "int":
+		return "int"
+	case "bigint":
+		return "int64"
+	case "float", "decimal":
+		return "float64"
+	case "boolean":
+		return "bool"
+	case "date", "datetime":
+		return "time.Time"
+	default:
+		return "string"
+	}
+}
+
+func resolveArrayType(database string, targetType string) string {
+	switch strings.ToLower(targetType) {
+	case "int":
+		return "[]int"
+	case "bigint":
+		return "[]int64"
+	case "float", "decimal":
+		return "[]float64"
+	case "boolean":
+		return "[]bool"
+	default:
+		if database == "postgresql" {
+			return "[]string"
+		}
+		return "[]string"
+	}
+}
+
+func navigationName(field *parser.ParsedField) string {
+	if field == nil {
+		return ""
+	}
+
+	name := field.Name
+	if field.IsMany {
+		name = singularize(name)
+	}
+	if strings.HasSuffix(strings.ToLower(name), "id") && len(name) > 2 {
+		name = name[:len(name)-2]
+	}
+	if name == "" {
+		name = field.RelationTarget
+	}
+	return pascalCase(name)
+}
+
+func normalizeDeleteBehavior(value string) string {
+	switch strings.ToLower(value) {
+	case "cascade":
+		return "CASCADE"
+	case "set_null":
+		return "SET NULL"
+	case "restrict":
+		return "RESTRICT"
+	case "no_action":
+		return "NO ACTION"
+	default:
+		return strings.ToUpper(strings.ReplaceAll(value, "_", " "))
+	}
+}
+
+func pluralize(name string) string {
+	lower := strings.ToLower(name)
+	if strings.HasSuffix(lower, "y") && len(name) > 1 {
+		return name[:len(name)-1] + "ies"
+	}
+	if strings.HasSuffix(lower, "s") || strings.HasSuffix(lower, "x") || strings.HasSuffix(lower, "z") {
+		return name + "es"
+	}
+	return name + "s"
+}
+
+func singularize(name string) string {
+	lower := strings.ToLower(name)
+	if strings.HasSuffix(lower, "ies") && len(name) > 3 {
+		return name[:len(name)-3] + "y"
+	}
+	if strings.HasSuffix(lower, "ses") || strings.HasSuffix(lower, "xes") || strings.HasSuffix(lower, "zes") {
+		return name[:len(name)-2]
+	}
+	if strings.HasSuffix(lower, "s") && len(name) > 1 {
+		return name[:len(name)-1]
+	}
+	return name
+}
+
+func pascalCase(value string) string {
+	if value == "" {
+		return ""
+	}
+	parts := splitIdentifier(value)
+	for i := range parts {
+		if parts[i] == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(parts[i][:1]) + strings.ToLower(parts[i][1:])
+	}
+	return strings.Join(parts, "")
+}
+
+func splitIdentifier(value string) []string {
+	value = strings.ReplaceAll(value, "-", "_")
+	value = strings.ReplaceAll(value, " ", "_")
+	var parts []string
+	var current []rune
+	var previous rune
+	for i, r := range value {
+		if r == '_' {
+			if len(current) > 0 {
+				parts = append(parts, string(current))
+				current = current[:0]
+			}
+			previous = 0
+			continue
+		}
+		if i > 0 && unicode.IsUpper(r) && previous != 0 && unicode.IsLower(previous) {
+			parts = append(parts, string(current))
+			current = current[:0]
+		}
+		current = append(current, r)
+		previous = r
+	}
+	if len(current) > 0 {
+		parts = append(parts, string(current))
+	}
+	if len(parts) == 0 {
+		return []string{value}
+	}
+	return parts
+}

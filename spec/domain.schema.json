@@ -1,0 +1,149 @@
+{
+  "$id": "domain.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "properties": {
+    "api_style": {
+      "enum": [
+        "rest",
+        "graphql",
+        "grpc"
+      ],
+      "type": "string"
+    },
+    "auth": {
+      "type": "string"
+    },
+    "database": {
+      "enum": [
+        "postgresql",
+        "mysql",
+        "sqlite",
+        "mssql",
+        "mongodb"
+      ],
+      "type": "string"
+    },
+    "entities": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "features": {
+            "items": {
+              "enum": [
+                "audit",
+                "audit_log",
+                "soft_delete",
+                "optimistic_lock"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "indexes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "fields": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "sort": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "unique": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "fields"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "permissions": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object"
+          },
+          "seed": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "enums": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "type": "object"
+    },
+    "project": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "multi_tenancy": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "mode": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "project",
+    "entities"
+  ],
+  "title": "DomainCraft domain.yaml schema",
+  "type": "object"
+}

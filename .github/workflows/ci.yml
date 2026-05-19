@@ -1,0 +1,58 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: parser
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+          cache-dependency-path: parser/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build ./cmd/parser
+
+      - name: Test
+        run: go test ./...
+
+  schema-check:
+    name: Verify generated schema is up to date
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: parser
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+          cache-dependency-path: parser/go.sum
+
+      - name: Regenerate schema to temp file
+        run: go run ./cmd/schema-gen -o "$RUNNER_TEMP/domain.schema.json"
+
+      - name: Compare schema with repo copy
+        run: diff -u spec/domain.schema.json "$RUNNER_TEMP/domain.schema.json"
