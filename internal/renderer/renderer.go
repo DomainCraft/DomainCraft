@@ -51,6 +51,15 @@ func (r *Renderer) buildFuncMap() template.FuncMap {
 	funcMap["lowercase"] = strings.ToLower
 	funcMap["uppercase"] = strings.ToUpper
 	funcMap["jsonValue"] = jsonValue
+	funcMap["rawSeedValue"] = rawSeedValue
+	funcMap["lookupField"] = func(fieldName string, entity ir.IREntity) *ir.IRField {
+		for i := range entity.Fields {
+			if entity.Fields[i].Name == fieldName {
+				return &entity.Fields[i]
+			}
+		}
+		return nil
+	}
 	funcMap["hasOwnershipToken"] = func(roles []string) bool {
 		for _, r := range roles {
 			if strings.HasPrefix(r, "@") {
@@ -111,14 +120,10 @@ func (r *Renderer) getBridgeSpecificFuncs() map[string]interface{} {
 		// languageType generic replacement using mapping
 		bridgeFuncs["languageType"] = func(goType string, nullable bool) string {
 			if mapped, ok := mapping.Types[goType]; ok {
-				res := mapped
 				if nullable {
-					// Check if mapped type is a value type that needs nullable suffix
-					if valueTypeSet[mapped] {
-						return res + "?"
-					}
+					return mapped + "?"
 				}
-				return res
+				return mapped
 			}
 			return goType
 		}
@@ -286,6 +291,25 @@ func jsonValue(value any) string {
 		return fmt.Sprintf("%v", value)
 	}
 	return string(encoded)
+}
+
+// rawSeedValue returns the seed value as a raw literal (unquoted numbers, booleans).
+// Language-specific wrapping (e.g. Guid.Parse, DateTime.Parse) belongs in templates.
+func rawSeedValue(value any, dbType string) string {
+	strVal := fmt.Sprintf("%v", value)
+
+	switch dbType {
+	case "float64", "decimal", "int", "int64":
+		return strings.Trim(strVal, "\"")
+	case "bool":
+		strVal = strings.ToLower(strings.Trim(strVal, "\""))
+		if strVal == "true" || strVal == "1" {
+			return "true"
+		}
+		return "false"
+	default:
+		return jsonValue(value)
+	}
 }
 
 func camelCase(value string) string {

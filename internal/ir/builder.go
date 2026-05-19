@@ -59,6 +59,7 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 			irEntity.Fields = append(irEntity.Fields, IRField{
 				Name:           field.Name,
 				DatabaseType:   resolveDatabaseType(schema.Database, field, schema),
+				NavigationName: navigationName(field),
 				IsPrimary:      field.IsPrimary,
 				IsNullable:     field.IsOptional,
 				IsUnique:       field.IsUnique,
@@ -151,6 +152,27 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 		}
 	}
 
+	// Resolve InverseNavName to actual forward navigation name on target entity.
+	// For OrderItem -> Order: InverseNavName should be "Items" (Order's forward nav),
+	// not the computed "OrderItems".
+	for i := range irProject.Entities {
+		entity := &irProject.Entities[i]
+		for j := range entity.RelationsOut {
+			rel := &entity.RelationsOut[j]
+			if rel.TargetEntity == nil || rel.IsMany {
+				continue
+			}
+			// Find matching forward IsMany relation on target entity
+			for _, targetRel := range rel.TargetEntity.RelationsOut {
+				if targetRel.IsMany && targetRel.TargetEntity != nil && targetRel.TargetEntity.Name == entity.Name {
+					// Use the field name (already plural in YAML) for collection navigations
+					rel.InverseNavName = pascalCase(targetRel.FieldName)
+					break
+				}
+			}
+		}
+	}
+
 	return irProject, nil
 }
 
@@ -204,8 +226,12 @@ func resolveDatabaseType(database string, field *parser.ParsedField, schema *par
 	}
 
 	switch field.Type {
-	case "string", "text", "uuid", "json", "jsonb":
+	case "string", "text":
 		return "string"
+	case "uuid":
+		return "uuid"
+	case "json", "jsonb":
+		return "json"
 	case "int":
 		return "int"
 	case "bigint":

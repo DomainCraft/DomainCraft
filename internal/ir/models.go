@@ -29,6 +29,7 @@ type IREntity struct {
 type IRField struct {
 	Name           string
 	DatabaseType   string
+	NavigationName string // resolved navigation property name (for relation fields)
 	IsPrimary      bool
 	IsNullable     bool
 	IsUnique       bool

@@ -63,7 +63,7 @@ The **Intermediate Representation (IR)** is the key design decision. It's a lang
 ### Build
 
 ```bash
-git clone https://github.com/your-org/domaincraft.git
+git clone https://github.com/DomainCraft/domaincraft-bridge-csharp.git
 cd domaincraft
 make install-deps
 make build
@@ -185,7 +185,7 @@ A **bridge** is a directory containing Go templates and configuration that tells
 
 | Bridge | Language/Framework | Status |
 |--------|-------------------|--------|
-| [DomainCraftCsharp](https://github.com/your-org/domaincraft-bridge-csharp) | C# / ASP.NET Core / EF Core / PostgreSQL | Ready |
+| [DomainCraftCsharp](https://github.com/DomainCraft/domaincraft-bridge-csharp) | C# / ASP.NET Core / EF Core / PostgreSQL | Ready |
 | domaincraft-bridge-java | Java / Spring Boot | Planned |
 | domaincraft-bridge-typescript | TypeScript / Express / Prisma | Planned |
 
