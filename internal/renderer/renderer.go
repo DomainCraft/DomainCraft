@@ -142,6 +142,15 @@ func (r *Renderer) getBridgeSpecificFuncs() map[string]interface{} {
 			}
 			return pascalCase(strings.ReplaceAll(strings.ReplaceAll(value, "_", " "), "-", " "))
 		}
+
+		bridgeFuncs["isPublicPermission"] = func(roles []string) bool {
+			for _, r := range roles {
+				if r == "*" {
+					return true
+				}
+			}
+			return false
+		}
 	}
 	return bridgeFuncs
 }
