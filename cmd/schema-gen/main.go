@@ -35,33 +35,10 @@ func buildSchema() map[string]any {
 		"type":                 "object",
 		"additionalProperties": false,
 		"properties": map[string]any{
-			"project": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name":        map[string]any{"type": "string"},
-					"description": map[string]any{"type": "string"},
-					"version":     map[string]any{"type": "string"},
-					"multi_tenancy": map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"enabled": map[string]any{"type": "boolean"},
-							"mode":    map[string]any{"type": "string"},
-						},
-						"additionalProperties": false,
-					},
-				},
-				"required":             []string{"name"},
-				"additionalProperties": false,
-			},
-			"database": map[string]any{
-				"type": "string",
-				"enum": specmeta.Databases,
-			},
-			"auth": map[string]any{"type": "string"},
-			"api_style": map[string]any{
-				"type": "string",
-				"enum": specmeta.APIStyles,
-			},
+			"project":   map[string]any{"$ref": "#/$defs/Project"},
+			"database":  map[string]any{"type": "string", "enum": specmeta.Databases},
+			"auth":      map[string]any{"type": "string"},
+			"api_style": map[string]any{"type": "string", "enum": specmeta.APIStyles},
 			"enums": map[string]any{
 				"type": "object",
 				"additionalProperties": map[string]any{
@@ -70,52 +47,90 @@ func buildSchema() map[string]any {
 				},
 			},
 			"entities": map[string]any{
-				"type": "object",
-				"additionalProperties": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"features": map[string]any{
-							"type":  "array",
-							"items": map[string]any{"type": "string", "enum": specmeta.Features},
-						},
-						"fields": map[string]any{
-							"type":                 "object",
-							"additionalProperties": map[string]any{"type": "string"},
-						},
-						"indexes": map[string]any{
-							"type": "array",
-							"items": map[string]any{
-								"type": "object",
-								"properties": map[string]any{
-									"fields": map[string]any{
-										"type":  "array",
-										"items": map[string]any{"type": "string"},
-									},
-									"type":   map[string]any{"type": "string"},
-									"sort":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-									"unique": map[string]any{"type": "boolean"},
-								},
-								"required":             []string{"fields"},
-								"additionalProperties": false,
-							},
-						},
-						"permissions": map[string]any{
-							"type": "object",
-							"additionalProperties": map[string]any{
-								"type":  "array",
-								"items": map[string]any{"type": "string"},
-							},
-						},
-						"seed": map[string]any{
-							"type":  "array",
-							"items": map[string]any{"type": "object", "additionalProperties": true},
-						},
-					},
-					"required":             []string{"fields"},
-					"additionalProperties": false,
-				},
+				"type":                 "object",
+				"additionalProperties": map[string]any{"$ref": "#/$defs/EntityDefinition"},
 			},
 		},
 		"required": []string{"project", "entities"},
+		"$defs": map[string]any{
+			"Project": map[string]any{
+				"title":                "Project",
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"name":         map[string]any{"type": "string"},
+					"description":  map[string]any{"type": "string"},
+					"version":      map[string]any{"type": "string"},
+					"multi_tenancy": map[string]any{
+						"$ref": "#/$defs/MultiTenancy",
+					},
+				},
+				"required": []string{"name"},
+			},
+			"MultiTenancy": map[string]any{
+				"title":                "MultiTenancy",
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"enabled": map[string]any{"type": "boolean"},
+					"mode":    map[string]any{"type": "string"},
+				},
+				"required": []string{"enabled"},
+			},
+			"EntityDefinition": map[string]any{
+				"title":                "EntityDefinition",
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"features": map[string]any{
+						"type":  "array",
+						"items": map[string]any{"type": "string", "enum": specmeta.Features},
+					},
+					"fields": map[string]any{
+						"type":                 "object",
+						"additionalProperties": map[string]any{"type": "string"},
+					},
+					"indexes": map[string]any{
+						"type":  "array",
+						"items": map[string]any{"$ref": "#/$defs/IndexDefinition"},
+					},
+					"permissions": map[string]any{
+						"$ref": "#/$defs/EntityPermissions",
+					},
+					"seed": map[string]any{
+						"type":  "array",
+						"items": map[string]any{"type": "object", "additionalProperties": true},
+					},
+				},
+				"required": []string{"fields"},
+			},
+			"IndexDefinition": map[string]any{
+				"title":                "IndexDefinition",
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"fields": map[string]any{
+						"type":  "array",
+						"items": map[string]any{"type": "string"},
+					},
+					"type":   map[string]any{"type": "string"},
+					"sort":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"unique": map[string]any{"type": "boolean"},
+				},
+				"required": []string{"fields"},
+			},
+			"EntityPermissions": map[string]any{
+				"title":                "EntityPermissions",
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"read":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"create":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"update":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"delete":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"read_public": map[string]any{"type": "string"},
+				},
+			},
+		},
 	}
 }

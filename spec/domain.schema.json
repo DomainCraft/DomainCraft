@@ -1,4 +1,150 @@
 {
+  "$defs": {
+    "EntityDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "features": {
+          "items": {
+            "enum": [
+              "audit",
+              "audit_log",
+              "soft_delete",
+              "optimistic_lock"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "fields": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "indexes": {
+          "items": {
+            "$ref": "#/$defs/IndexDefinition"
+          },
+          "type": "array"
+        },
+        "permissions": {
+          "$ref": "#/$defs/EntityPermissions"
+        },
+        "seed": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "title": "EntityDefinition",
+      "type": "object"
+    },
+    "EntityPermissions": {
+      "additionalProperties": false,
+      "properties": {
+        "create": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "delete": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "read": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "read_public": {
+          "type": "string"
+        },
+        "update": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "title": "EntityPermissions",
+      "type": "object"
+    },
+    "IndexDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sort": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "type": {
+          "type": "string"
+        },
+        "unique": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "title": "IndexDefinition",
+      "type": "object"
+    },
+    "MultiTenancy": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "MultiTenancy",
+      "type": "object"
+    },
+    "Project": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "multi_tenancy": {
+          "$ref": "#/$defs/MultiTenancy"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Project",
+      "type": "object"
+    }
+  },
   "$id": "domain.schema.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
@@ -26,77 +172,7 @@
     },
     "entities": {
       "additionalProperties": {
-        "additionalProperties": false,
-        "properties": {
-          "features": {
-            "items": {
-              "enum": [
-                "audit",
-                "audit_log",
-                "soft_delete",
-                "optimistic_lock"
-              ],
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "fields": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object"
-          },
-          "indexes": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "fields": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                "sort": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                "type": {
-                  "type": "string"
-                },
-                "unique": {
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "fields"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "permissions": {
-            "additionalProperties": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "type": "object"
-          },
-          "seed": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "fields"
-        ],
-        "type": "object"
+        "$ref": "#/$defs/EntityDefinition"
       },
       "type": "object"
     },
@@ -110,34 +186,7 @@
       "type": "object"
     },
     "project": {
-      "additionalProperties": false,
-      "properties": {
-        "description": {
-          "type": "string"
-        },
-        "multi_tenancy": {
-          "additionalProperties": false,
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            },
-            "mode": {
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "name": {
-          "type": "string"
-        },
-        "version": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "type": "object"
+      "$ref": "#/$defs/Project"
     }
   },
   "required": [

@@ -4,7 +4,7 @@ OUTPUT ?= generated
 BRIDGE_NAME ?= csharp
 SPEC_OUTPUT ?= spec/domain.schema.json
 
-.PHONY: help build run test test-verbose test-coverage lint fmt clean install-deps cli-validate cli-generate cli-init regenerate-spec
+.PHONY: help build run test test-verbose test-coverage lint fmt clean install-deps cli-validate cli-generate cli-init regenerate-spec generate-gui-types
 
 help:
 	@echo "DomainCraft Parser - Available Commands"
@@ -14,7 +14,8 @@ help:
 	@echo "  make cli-validate    - Run the CLI 'validate' command (uses DOMAIN=$(DOMAIN))"
 	@echo "  make cli-generate    - Run the CLI 'generate' command (uses DOMAIN=$(DOMAIN) BRIDGE=$(BRIDGE) OUTPUT=$(OUTPUT))"
 	@echo "  make cli-init        - Run the CLI 'init' command (uses BRIDGE_NAME=$(BRIDGE_NAME))"
-	@echo "  make regenerate-spec - Regenerate spec/domain.schema.json from core metadata"
+	@echo "  make regenerate-spec - Regenerate spec/domain.schema.json and GUI TypeScript types"
+	@echo "  make generate-gui-types - Regenerate only GUI TypeScript types from schema"
 	@echo "  make test            - Run all tests"
 	@echo "  make test-verbose    - Run tests with verbose output"
 	@echo "  make test-coverage   - Run tests and generate coverage report"
@@ -52,6 +53,12 @@ cli-init:
 regenerate-spec:
 	@echo "Running: go run ./cmd/schema-gen -o $(SPEC_OUTPUT)"
 	@go run ./cmd/schema-gen -o $(SPEC_OUTPUT)
+	@echo "Generating TypeScript types for GUI..."
+	@cd ../DomainCraftGui && npm run generate:types
+
+generate-gui-types:
+	@echo "Generating TypeScript types for GUI..."
+	@cd ../DomainCraftGui && npm run generate:types
 
 test: install-deps
 	@echo "Running tests..."
