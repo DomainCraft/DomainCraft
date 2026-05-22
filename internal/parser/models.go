@@ -43,15 +43,6 @@ type RawIndex struct {
 	Unique bool     `yaml:"unique"`
 }
 
-// RawPermissions defines access control for an entity
-type RawPermissions struct {
-	Read       []string `yaml:"read"`
-	Create     []string `yaml:"create"`
-	Update     []string `yaml:"update"`
-	Delete     []string `yaml:"delete"`
-	ReadPublic string   `yaml:"read_public"` // condition(field == value)
-}
-
 // ParseRawSchema reads YAML and converts it to RawSchema
 func ParseRawSchema(data []byte) (*RawSchema, error) {
 	schema := &RawSchema{}

@@ -44,6 +44,7 @@ entities:
       firstName: string [required, min:2, max:50]
       lastName: string [required, min:2, max:50]
       avatar: string [optional, url]
+      phoneNumbers: array(string)
       isActive: boolean [default:true]
       role: enum(UserRole) [default:customer]
     
@@ -65,6 +66,7 @@ entities:
       categoryId: relation(Category) [optional, on_delete:set_null]
       supplierId: relation(User) [required, on_delete:restrict]
       tags: relation(Tag) [many]
+      images: array(string)
       metadata: json [optional]
     
     indexes:

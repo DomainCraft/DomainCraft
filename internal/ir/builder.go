@@ -225,6 +225,7 @@ func resolveDatabaseType(database string, field *parser.ParsedField, schema *par
 		return "string"
 	}
 
+	// Return language-agnostic type names matching specmeta.FieldTypes
 	switch field.Type {
 	case "string", "text":
 		return "string"
@@ -235,13 +236,17 @@ func resolveDatabaseType(database string, field *parser.ParsedField, schema *par
 	case "int":
 		return "int"
 	case "bigint":
-		return "int64"
-	case "float", "decimal":
-		return "float64"
+		return "bigint"
+	case "float":
+		return "float"
+	case "decimal":
+		return "decimal"
 	case "boolean":
-		return "bool"
-	case "date", "datetime":
-		return "time.Time"
+		return "boolean"
+	case "date":
+		return "date"
+	case "datetime":
+		return "datetime"
 	default:
 		return "string"
 	}
@@ -250,18 +255,17 @@ func resolveDatabaseType(database string, field *parser.ParsedField, schema *par
 func resolveArrayType(database string, targetType string) string {
 	switch strings.ToLower(targetType) {
 	case "int":
-		return "[]int"
+		return "array(int)"
 	case "bigint":
-		return "[]int64"
-	case "float", "decimal":
-		return "[]float64"
+		return "array(bigint)"
+	case "float":
+		return "array(float)"
+	case "decimal":
+		return "array(decimal)"
 	case "boolean":
-		return "[]bool"
+		return "array(boolean)"
 	default:
-		if database == "postgresql" {
-			return "[]string"
-		}
-		return "[]string"
+		return "array(string)"
 	}
 }
 

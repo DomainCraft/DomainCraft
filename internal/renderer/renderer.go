@@ -308,9 +308,9 @@ func rawSeedValue(value any, dbType string) string {
 	strVal := fmt.Sprintf("%v", value)
 
 	switch dbType {
-	case "float64", "decimal", "int", "int64":
+	case "float", "decimal", "int", "bigint":
 		return strings.Trim(strVal, "\"")
-	case "bool":
+	case "boolean":
 		strVal = strings.ToLower(strings.Trim(strVal, "\""))
 		if strVal == "true" || strVal == "1" {
 			return "true"
