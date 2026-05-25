@@ -8,8 +8,25 @@ type IRProject struct {
 	Database string
 	Auth     string
 	APIStyle string
+	Platform string // target platform version (e.g. "net9.0"), passed through to templates
 	Enums    map[string][]string
 	Entities []IREntity
+	Cache    *IRCacheConfig
+	CORS     *IRCORSConfig
+}
+
+// IRCacheConfig represents cache configuration in IR.
+type IRCacheConfig struct {
+	Enabled          bool
+	Provider         string
+	ConnectionString string
+	TTLSeconds       int
+}
+
+// IRCORSConfig represents CORS configuration in IR.
+type IRCORSConfig struct {
+	Enabled bool
+	Origins []string
 }
 
 // IREntity represents an entity in IR.

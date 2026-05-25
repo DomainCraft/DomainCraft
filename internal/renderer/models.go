@@ -4,12 +4,13 @@ import "domaincraft/internal/ir"
 
 // BridgeConfig describes bridge.yaml.
 type BridgeConfig struct {
-	Name        string                 `yaml:"name"`
-	Description string                 `yaml:"description"`
-	OutputDir   string                 `yaml:"output_dir"`
-	Helpers     string                 `yaml:"helpers"` // Optional shared template file with named templates
-	Config      map[string]interface{} `yaml:"config"`  // Bridge-specific config available as .Bridge in templates
-	Templates   []TemplateSpec         `yaml:"templates"`
+	Name             string                       `yaml:"name"`
+	Description      string                       `yaml:"description"`
+	OutputDir        string                       `yaml:"output_dir"`
+	Helpers          string                       `yaml:"helpers"`            // Optional shared template file with named templates
+	RegistryURL      string            `yaml:"registry_url"`       // URL template for package registry ({id} = lowercase package ID)
+	RegistryPackages map[string]string  `yaml:"registry_packages"`  // logical key -> registry package ID (used with registry_url)
+	Templates        []TemplateSpec    `yaml:"templates"`
 }
 
 // TemplateSpec describes one template rendering rule.
@@ -43,9 +44,10 @@ func (s TemplateSpec) TargetPatterns() []string {
 
 // RenderContext is passed to templates.
 type RenderContext struct {
-	Project *ir.IRProject
-	Entity  *ir.IREntity
-	Bridge  *BridgeConfig // Bridge-level config available as .Bridge
+	Project  *ir.IRProject
+	Entity   *ir.IREntity
+	Bridge   *BridgeConfig    // Bridge-level config available as .Bridge
+	Packages map[string]string // Resolved package versions for the current platform
 }
 
 // Name exposes the current entity name to templates.

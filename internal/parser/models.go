@@ -17,7 +17,24 @@ type ProjectConfig struct {
 	Name         string              `yaml:"name"`
 	Description  string              `yaml:"description"`
 	Version      string              `yaml:"version"`
+	Platform     string              `yaml:"platform"`
 	MultiTenancy *MultiTenancyConfig `yaml:"multi_tenancy"`
+	Cache        *CacheConfig        `yaml:"cache"`
+	CORS         *CORSConfig         `yaml:"cors"`
+}
+
+// CacheConfig represents cache configuration (agnostic — no language/platform specifics).
+type CacheConfig struct {
+	Enabled          bool   `yaml:"enabled"`
+	Provider         string `yaml:"provider"`
+	ConnectionString string `yaml:"connection_string"`
+	TTLSeconds       int    `yaml:"ttl_seconds"`
+}
+
+// CORSConfig represents CORS configuration.
+type CORSConfig struct {
+	Enabled bool     `yaml:"enabled"`
+	Origins []string `yaml:"origins"`
 }
 
 // MultiTenancyConfig holds multi-tenancy settings

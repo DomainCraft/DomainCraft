@@ -26,8 +26,24 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 		Database: schema.Database,
 		Auth:     schema.Auth,
 		APIStyle: schema.APIStyle,
+		Platform: schema.Project.Platform,
 		Enums:    schema.Enums,
 		Entities: make([]IREntity, 0, len(schema.Entities)),
+	}
+
+	if schema.Project.Cache != nil {
+		irProject.Cache = &IRCacheConfig{
+			Enabled:          schema.Project.Cache.Enabled,
+			Provider:         schema.Project.Cache.Provider,
+			ConnectionString: schema.Project.Cache.ConnectionString,
+			TTLSeconds:       schema.Project.Cache.TTLSeconds,
+		}
+	}
+	if schema.Project.CORS != nil {
+		irProject.CORS = &IRCORSConfig{
+			Enabled: schema.Project.CORS.Enabled,
+			Origins: append([]string(nil), schema.Project.CORS.Origins...),
+		}
 	}
 
 	entityIndex := make(map[string]*IREntity, len(schema.Entities))

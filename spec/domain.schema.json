@@ -1,5 +1,48 @@
 {
   "$defs": {
+    "CORSConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "origins": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "CORSConfig",
+      "type": "object"
+    },
+    "CacheConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "connection_string": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "provider": {
+          "description": "Cache provider (redis, memcached, etc.)",
+          "type": "string"
+        },
+        "ttl_seconds": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "CacheConfig",
+      "type": "object"
+    },
     "EntityDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -125,6 +168,12 @@
     "Project": {
       "additionalProperties": false,
       "properties": {
+        "cache": {
+          "$ref": "#/$defs/CacheConfig"
+        },
+        "cors": {
+          "$ref": "#/$defs/CORSConfig"
+        },
         "description": {
           "type": "string"
         },
@@ -132,6 +181,10 @@
           "$ref": "#/$defs/MultiTenancy"
         },
         "name": {
+          "type": "string"
+        },
+        "platform": {
+          "description": "Target platform version (e.g. net9.0, net8.0)",
           "type": "string"
         },
         "version": {

@@ -3,10 +3,13 @@ package renderer
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
+	"time"
 
 	"domaincraft/internal/ir"
 	"domaincraft/internal/specmeta"
@@ -312,7 +315,7 @@ func (r *Renderer) shouldRender(spec TemplateSpec, project *ir.IRProject) bool {
 	if spec.When == "" || spec.For == "entity" {
 		return true
 	}
-	return r.shouldRenderContext(spec, RenderContext{Project: project, Bridge: &r.config})
+	return r.shouldRenderContext(spec, RenderContext{Project: project, Bridge: &r.config, Packages: r.resolvePackages()})
 }
 
 func (r *Renderer) shouldRenderContext(spec TemplateSpec, context RenderContext) bool {
@@ -363,16 +366,34 @@ func (r *Renderer) shouldRenderContext(spec TemplateSpec, context RenderContext)
 	}
 }
 
+// resolvePackages resolves all package versions from the package registry.
+func (r *Renderer) resolvePackages() map[string]string {
+	if len(r.config.RegistryPackages) == 0 {
+		return nil
+	}
+
+	result := make(map[string]string, len(r.config.RegistryPackages))
+	for key, packageID := range r.config.RegistryPackages {
+		version, err := resolveRegistryVersion(r.config.RegistryURL, packageID)
+		if err == nil && version != "" {
+			result[key] = version
+		}
+	}
+	return result
+}
+
 func (r *Renderer) renderContexts(scope string, project *ir.IRProject) ([]RenderContext, error) {
+	pkgs := r.resolvePackages()
+
 	switch strings.ToLower(strings.TrimSpace(scope)) {
 	case "", "entity":
 		contexts := make([]RenderContext, 0, len(project.Entities))
 		for i := range project.Entities {
-			contexts = append(contexts, RenderContext{Project: project, Entity: &project.Entities[i], Bridge: &r.config})
+			contexts = append(contexts, RenderContext{Project: project, Entity: &project.Entities[i], Bridge: &r.config, Packages: pkgs})
 		}
 		return contexts, nil
 	case "project":
-		return []RenderContext{{Project: project, Bridge: &r.config}}, nil
+		return []RenderContext{{Project: project, Bridge: &r.config, Packages: pkgs}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported template scope '%s'", scope)
 	}
@@ -422,5 +443,78 @@ func rawSeedValue(value any, dbType string) string {
 		return "false"
 	}
 	return jsonValue(value)
+}
+
+var registryClient = &http.Client{Timeout: 5 * time.Second}
+
+// resolveRegistryVersion queries a package registry (e.g. NuGet) for the latest stable version
+// of a package. The registryURL template must contain {id} which is replaced with the package ID.
+func resolveRegistryVersion(registryURL string, packageID string) (string, error) {
+	url := strings.ReplaceAll(registryURL, "{id}", strings.ToLower(packageID))
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := registryClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("registry returned %d for %s", resp.StatusCode, packageID)
+	}
+
+	var result struct {
+		Versions []string `json:"versions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+
+	// Filter for stable versions (no pre-release suffix) and sort descending.
+	stable := make([]string, 0, len(result.Versions))
+	for _, v := range result.Versions {
+		if !strings.ContainsAny(v, "-") {
+			stable = append(stable, v)
+		}
+	}
+	if len(stable) == 0 {
+		return "", fmt.Errorf("no stable versions found for %s", packageID)
+	}
+
+	sort.SliceStable(stable, func(i, j int) bool {
+		return versionGreater(stable[i], stable[j])
+	})
+
+	return stable[0], nil
+}
+
+// versionGreater compares two semver strings and returns true if a > b.
+func versionGreater(a, b string) bool {
+	aParts := strings.Split(a, ".")
+	bParts := strings.Split(b, ".")
+	maxLen := len(aParts)
+	if len(bParts) > maxLen {
+		maxLen = len(bParts)
+	}
+	for i := 0; i < maxLen; i++ {
+		var ai, bi int
+		if i < len(aParts) {
+			fmt.Sscanf(aParts[i], "%d", &ai)
+		}
+		if i < len(bParts) {
+			fmt.Sscanf(bParts[i], "%d", &bi)
+		}
+		if ai > bi {
+			return true
+		}
+		if ai < bi {
+			return false
+		}
+	}
+	return false
 }
 

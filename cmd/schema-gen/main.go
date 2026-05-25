@@ -61,11 +61,43 @@ func buildSchema() map[string]any {
 					"name":         map[string]any{"type": "string"},
 					"description":  map[string]any{"type": "string"},
 					"version":      map[string]any{"type": "string"},
+					"platform":     map[string]any{"type": "string", "description": "Target platform version (e.g. net9.0, net8.0)"},
 					"multi_tenancy": map[string]any{
 						"$ref": "#/$defs/MultiTenancy",
 					},
+					"cache": map[string]any{
+						"$ref": "#/$defs/CacheConfig",
+					},
+					"cors": map[string]any{
+						"$ref": "#/$defs/CORSConfig",
+					},
 				},
 				"required": []string{"name"},
+			},
+			"CacheConfig": map[string]any{
+				"title":                "CacheConfig",
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"enabled":           map[string]any{"type": "boolean"},
+					"provider":          map[string]any{"type": "string", "description": "Cache provider (redis, memcached, etc.)"},
+					"connection_string": map[string]any{"type": "string"},
+					"ttl_seconds":       map[string]any{"type": "integer", "minimum": 0},
+				},
+				"required": []string{"enabled"},
+			},
+			"CORSConfig": map[string]any{
+				"title":                "CORSConfig",
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"enabled": map[string]any{"type": "boolean"},
+					"origins": map[string]any{
+						"type":  "array",
+						"items": map[string]any{"type": "string"},
+					},
+				},
+				"required": []string{"enabled"},
 			},
 			"MultiTenancy": map[string]any{
 				"title":                "MultiTenancy",
