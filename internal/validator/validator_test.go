@@ -1,10 +1,11 @@
 package validator
 
 import (
+	"strings"
 	"testing"
 
-	"domaincraft/internal/lexer"
 	"domaincraft/internal/parser"
+	"domaincraft/internal/testutil"
 )
 
 func TestValidateDetectsMissingPrimaryKey(t *testing.T) {
@@ -89,12 +90,59 @@ func TestValidateDetectsSetNullOnRequiredField(t *testing.T) {
 	}
 }
 
-func mustParsedField(t *testing.T, name, input string) *parser.ParsedField {
-	t.Helper()
-	fieldDef, err := lexer.ParseFieldString(input)
-	if err != nil {
-		t.Fatalf("ParseFieldString(%q) error = %v", input, err)
+func TestValidateDetectsUndefinedEnum(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		EntityOrder: []string{"Product"},
+		Enums:       map[string][]string{"ProductStatus": {"DRAFT", "PUBLISHED"}},
+		Entities: map[string]*parser.ParsedEntity{
+			"Product": {
+				Name:       "Product",
+				FieldOrder: []string{"id", "status"},
+				Fields: map[string]*parser.ParsedField{
+					"id":     mustParsedField(t, "id", "uuid [primary]"),
+					"status": mustParsedField(t, "status", "enum(NoSuchEnum)"),
+				},
+			},
+		},
 	}
-	fieldDef.Name = name
-	return &parser.ParsedField{FieldDefinition: fieldDef}
+	schema.Entities["Product"].Fields["id"].IsPrimary = true
+
+	errs := New(schema).Validate()
+	found := false
+	for _, e := range errs {
+		if e.Field == "status" && strings.Contains(e.Message, "NoSuchEnum") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected error about undefined enum, got %v", errs)
+	}
+}
+
+func TestValidatePassesValidEnums(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		EntityOrder: []string{"Product"},
+		Enums:       map[string][]string{"ProductStatus": {"DRAFT", "PUBLISHED"}},
+		Entities: map[string]*parser.ParsedEntity{
+			"Product": {
+				Name:       "Product",
+				FieldOrder: []string{"id", "status", "tags"},
+				Fields: map[string]*parser.ParsedField{
+					"id":     mustParsedField(t, "id", "uuid [primary]"),
+					"status": mustParsedField(t, "status", "enum(ProductStatus)"),
+					"tags":   mustParsedField(t, "tags", "array(ProductStatus)"),
+				},
+			},
+		},
+	}
+	schema.Entities["Product"].Fields["id"].IsPrimary = true
+
+	errs := New(schema).Validate()
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors for valid enums, got %v", errs)
+	}
+}
+
+func mustParsedField(t *testing.T, name, input string) *parser.ParsedField {
+	return testutil.MustParsedField(t, name, input)
 }

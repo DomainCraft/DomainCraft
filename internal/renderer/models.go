@@ -4,10 +4,12 @@ import "domaincraft/internal/ir"
 
 // BridgeConfig describes bridge.yaml.
 type BridgeConfig struct {
-	Name        string         `yaml:"name"`
-	Description string         `yaml:"description"`
-	OutputDir   string         `yaml:"output_dir"`
-	Templates   []TemplateSpec `yaml:"templates"`
+	Name        string                 `yaml:"name"`
+	Description string                 `yaml:"description"`
+	OutputDir   string                 `yaml:"output_dir"`
+	Helpers     string                 `yaml:"helpers"` // Optional shared template file with named templates
+	Config      map[string]interface{} `yaml:"config"`  // Bridge-specific config available as .Bridge in templates
+	Templates   []TemplateSpec         `yaml:"templates"`
 }
 
 // TemplateSpec describes one template rendering rule.
@@ -43,6 +45,7 @@ func (s TemplateSpec) TargetPatterns() []string {
 type RenderContext struct {
 	Project *ir.IRProject
 	Entity  *ir.IREntity
+	Bridge  *BridgeConfig // Bridge-level config available as .Bridge
 }
 
 // Name exposes the current entity name to templates.
@@ -64,6 +67,11 @@ func (c RenderContext) NamePlural() string {
 // HasAudit reports whether the current entity has audit fields enabled.
 func (c RenderContext) HasAudit() bool {
 	return c.Entity != nil && c.Entity.HasAudit
+}
+
+// HasAuditLog reports whether the current entity has audit-log fields enabled.
+func (c RenderContext) HasAuditLog() bool {
+	return c.Entity != nil && c.Entity.HasAuditLog
 }
 
 // HasSoftDelete reports whether the current entity has soft delete enabled.
@@ -90,6 +98,11 @@ func (c RenderContext) Seed() []map[string]interface{} {
 		return nil
 	}
 	return c.Entity.Seed
+}
+
+// HasFeature reports whether the current entity has the named feature enabled.
+func (c RenderContext) HasFeature(name string) bool {
+	return c.Entity != nil && c.Entity.HasFeature(name)
 }
 
 // PrimaryKey returns the primary key field of the current entity, or nil if not found.

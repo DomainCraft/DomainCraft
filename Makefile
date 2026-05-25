@@ -3,6 +3,11 @@ BRIDGE ?= bridges/csharp
 OUTPUT ?= generated
 BRIDGE_NAME ?= csharp
 SPEC_OUTPUT ?= spec/domain.schema.json
+GO_CACHE_DIR ?= $(CURDIR)/.gocache
+GO_TMP_DIR ?= $(CURDIR)/bin
+
+export GOCACHE := $(GO_CACHE_DIR)
+export GOTMPDIR := $(GO_TMP_DIR)
 
 .PHONY: help build run test test-verbose test-coverage lint fmt clean install-deps cli-validate cli-generate cli-init regenerate-spec generate-gui-types
 

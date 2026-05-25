@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"domaincraft/internal/lexer"
+	"domaincraft/internal/specmeta"
+	"domaincraft/pkg/textutil"
 )
 
 // Parser is the main parser for converting RawSchema to ParsedSchema
@@ -100,7 +102,7 @@ func (p *Parser) Parse() (*ParsedSchema, error) {
 func (p *Parser) parseEntity(name string, raw RawEntity) (*ParsedEntity, error) {
 	entity := &ParsedEntity{
 		Name:       name,
-		NamePlural: pluralize(name),
+		NamePlural: textutil.Pluralize(name),
 		Features:   make(map[string]bool),
 		Fields:     make(map[string]*ParsedField),
 		FieldOrder: make([]string, 0),
@@ -108,12 +110,10 @@ func (p *Parser) parseEntity(name string, raw RawEntity) (*ParsedEntity, error) 
 	}
 
 	// Parse features (behavior macros)
+	featureSet := specmeta.SliceToSet(specmeta.Features)
 	for _, feature := range raw.Features {
-		validFeatures := map[string]bool{
-			"audit": true, "audit_log": true, "soft_delete": true, "optimistic_lock": true,
-		}
 		feature = strings.TrimSpace(feature)
-		if !validFeatures[feature] {
+		if !featureSet[feature] {
 			return nil, fmt.Errorf("unknown feature: %s", feature)
 		}
 		entity.Features[feature] = true
@@ -148,40 +148,15 @@ func (p *Parser) parseEntity(name string, raw RawEntity) (*ParsedEntity, error) 
 
 	// Parse permissions
 	if raw.Permissions != nil {
-		perms := &ParsedPermissions{}
-
-		if read, ok := raw.Permissions["read"]; ok {
-			if readList, ok := read.([]interface{}); ok {
-				for _, r := range readList {
-					perms.Read = append(perms.Read, fmt.Sprint(r))
-				}
-			}
-		}
-		if create, ok := raw.Permissions["create"]; ok {
-			if createList, ok := create.([]interface{}); ok {
-				for _, c := range createList {
-					perms.Create = append(perms.Create, fmt.Sprint(c))
-				}
-			}
-		}
-		if update, ok := raw.Permissions["update"]; ok {
-			if updateList, ok := update.([]interface{}); ok {
-				for _, u := range updateList {
-					perms.Update = append(perms.Update, fmt.Sprint(u))
-				}
-			}
-		}
-		if delete, ok := raw.Permissions["delete"]; ok {
-			if deleteList, ok := delete.([]interface{}); ok {
-				for _, d := range deleteList {
-					perms.Delete = append(perms.Delete, fmt.Sprint(d))
-				}
-			}
+		perms := &ParsedPermissions{
+			Read:       extractStringList(raw.Permissions, "read"),
+			Create:     extractStringList(raw.Permissions, "create"),
+			Update:     extractStringList(raw.Permissions, "update"),
+			Delete:     extractStringList(raw.Permissions, "delete"),
 		}
 		if readPublic, ok := raw.Permissions["read_public"]; ok {
 			perms.ReadPublic = fmt.Sprint(readPublic)
 		}
-
 		entity.Permissions = perms
 	}
 
@@ -209,124 +184,57 @@ func (p *Parser) parseField(name string, fieldDef string) (*ParsedField, error) 
 	return pf, nil
 }
 
-// addFeatureFields adds automatic fields based on entity features
+// addFeatureFields adds automatic fields based on entity features.
+// Uses specmeta.FeatureFieldDefs as the single source of truth.
 func (p *Parser) addFeatureFields(entity *ParsedEntity) error {
-	// audit: adds createdAt and updatedAt
-	if entity.Features["audit"] {
-		createdAtField := &ParsedField{
-			FieldDefinition: &lexer.FieldDefinition{
-				Name:          "createdAt",
-				Type:          "datetime",
-				IsRequired:    true,
-				IsPrimary:     false,
-				IsOptional:    false,
-				Validations:   make(map[string]string),
-				DefaultValue:  "now",
-				DefaultIsFunc: true,
-			},
-			DatabaseColumnName: "created_at",
+	for _, fieldName := range []string{"createdAt", "updatedAt", "createdBy", "updatedBy", "deletedAt", "version"} {
+		def, ok := specmeta.FeatureFieldDefs[fieldName]
+		if !ok {
+			continue
 		}
-		updatedAtField := &ParsedField{
-			FieldDefinition: &lexer.FieldDefinition{
-				Name:          "updatedAt",
-				Type:          "datetime",
-				IsRequired:    true,
-				IsPrimary:     false,
-				IsOptional:    false,
-				Validations:   make(map[string]string),
-				DefaultValue:  "now",
-				DefaultIsFunc: true,
-			},
-			DatabaseColumnName: "updated_at",
+		if !entity.Features[def.Feature] {
+			continue
 		}
-		entity.Fields["createdAt"] = createdAtField
-		entity.Fields["updatedAt"] = updatedAtField
-		entity.FieldOrder = append(entity.FieldOrder, "createdAt", "updatedAt")
+		entity.Fields[fieldName] = newFeatureField(fieldName, def.Type, def.DBColumn, def.IsFuncDefault, def.DefaultValue)
+		if def.IsOptional {
+			entity.Fields[fieldName].IsOptional = true
+		}
+		entity.FieldOrder = append(entity.FieldOrder, fieldName)
 	}
-
-	// audit_log: adds createdBy and updatedBy (uuid references to User)
-	if entity.Features["audit_log"] {
-		createdByField := &ParsedField{
-			FieldDefinition: &lexer.FieldDefinition{
-				Name:        "createdBy",
-				Type:        "uuid",
-				IsRequired:  true,
-				Validations: make(map[string]string),
-			},
-			DatabaseColumnName: "created_by",
-		}
-		updatedByField := &ParsedField{
-			FieldDefinition: &lexer.FieldDefinition{
-				Name:        "updatedBy",
-				Type:        "uuid",
-				IsRequired:  true,
-				Validations: make(map[string]string),
-			},
-			DatabaseColumnName: "updated_by",
-		}
-		entity.Fields["createdBy"] = createdByField
-		entity.Fields["updatedBy"] = updatedByField
-		entity.FieldOrder = append(entity.FieldOrder, "createdBy", "updatedBy")
-	}
-
-	// soft_delete: adds deletedAt (nullable datetime)
-	if entity.Features["soft_delete"] {
-		deletedAtField := &ParsedField{
-			FieldDefinition: &lexer.FieldDefinition{
-				Name:        "deletedAt",
-				Type:        "datetime",
-				IsOptional:  true,
-				Validations: make(map[string]string),
-			},
-			DatabaseColumnName: "deleted_at",
-		}
-		entity.Fields["deletedAt"] = deletedAtField
-		entity.FieldOrder = append(entity.FieldOrder, "deletedAt")
-	}
-
-	// optimistic_lock: adds version (int)
-	if entity.Features["optimistic_lock"] {
-		versionField := &ParsedField{
-			FieldDefinition: &lexer.FieldDefinition{
-				Name:         "version",
-				Type:         "int",
-				IsRequired:   true,
-				DefaultValue: "0",
-				Validations:  make(map[string]string),
-			},
-			DatabaseColumnName: "version",
-		}
-		entity.Fields["version"] = versionField
-		entity.FieldOrder = append(entity.FieldOrder, "version")
-	}
-
 	return nil
 }
 
-// Helper functions for name transformations
-
-// pluralize is a simple pluralizer for English nouns
-func pluralize(name string) string {
-	if strings.HasSuffix(name, "y") && len(name) > 1 {
-		// lady -> ladies
-		if !isVowel(name[len(name)-2]) {
-			return name[:len(name)-1] + "ies"
-		}
+// newFeatureField creates a ParsedField for an auto-generated feature field.
+func newFeatureField(name, typ, dbCol string, isFuncDefault bool, defaultVal string) *ParsedField {
+	fd := &lexer.FieldDefinition{
+		Name:         name,
+		Type:         typ,
+		IsRequired:   true,
+		Validations:  make(map[string]string),
+		DefaultValue: defaultVal,
+		DefaultIsFunc: isFuncDefault,
 	}
-	if strings.HasSuffix(name, "s") || strings.HasSuffix(name, "ss") ||
-		strings.HasSuffix(name, "x") || strings.HasSuffix(name, "z") {
-		return name + "es"
+	return &ParsedField{
+		FieldDefinition:    fd,
+		DatabaseColumnName: dbCol,
 	}
-	if strings.HasSuffix(name, "o") {
-		if !isVowel(name[len(name)-2]) {
-			return name + "es"
-		}
-	}
-	return name + "s"
 }
 
-func isVowel(b byte) bool {
-	return b == 'a' || b == 'e' || b == 'i' || b == 'o' || b == 'u'
+// extractStringList extracts a []string from a raw YAML map at the given key.
+func extractStringList(raw map[string]interface{}, key string) []string {
+	val, ok := raw[key]
+	if !ok {
+		return nil
+	}
+	list, ok := val.([]interface{})
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(list))
+	for _, item := range list {
+		result = append(result, fmt.Sprint(item))
+	}
+	return result
 }
 
 // toDatabaseColumnName converts camelCase to snake_case

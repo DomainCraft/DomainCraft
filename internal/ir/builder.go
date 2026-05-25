@@ -3,9 +3,10 @@ package ir
 import (
 	"fmt"
 	"strings"
-	"unicode"
 
 	"domaincraft/internal/parser"
+	"domaincraft/internal/specmeta"
+	"domaincraft/pkg/textutil"
 )
 
 // Builder converts ParsedSchema into IRProject.
@@ -39,7 +40,8 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 		irEntity := IREntity{
 			Name:              sourceEntity.Name,
 			NamePlural:        sourceEntity.NamePlural,
-			HasAudit:          sourceEntity.Features["audit"] || sourceEntity.Features["audit_log"],
+			HasAudit:          sourceEntity.Features["audit"],
+			HasAuditLog:       sourceEntity.Features["audit_log"],
 			HasSoftDelete:     sourceEntity.Features["soft_delete"],
 			HasOptimisticLock: sourceEntity.Features["optimistic_lock"],
 			Fields:            make([]IRField, 0, len(sourceEntity.FieldOrder)),
@@ -120,7 +122,7 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 				FieldName:        field.Name,
 				TargetEntity:     targetEntity,
 				NavigationName:   navigationName(field),
-				InverseNavName:   pluralize(irEntity.Name),
+				InverseNavName:   textutil.Pluralize(irEntity.Name),
 				OnDeleteBehavior: normalizeDeleteBehavior(field.OnDelete),
 				IsNullable:       field.IsOptional,
 				IsMany:           field.IsMany,
@@ -130,7 +132,7 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 			irEntity.RelationsOut = append(irEntity.RelationsOut, relation)
 
 			// Skip adding inverse RelationsIn if the target already has a forward IsMany
-			// relation to this entity (avoids duplicate ICollection navigations)
+			// relation to this entity (avoids duplicate inverse collection navigations)
 			hasForwardMany := false
 			for _, out := range targetEntity.RelationsOut {
 				if out.IsMany && out.TargetEntity != nil && out.TargetEntity.Name == irEntity.Name {
@@ -139,15 +141,15 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 				}
 			}
 			if !hasForwardMany {
-			targetEntity.RelationsIn = append(targetEntity.RelationsIn, IRRelation{
-				FieldName:        relation.FieldName,
-				TargetEntity:     irEntity,
-				NavigationName:   relation.NavigationName,
-				InverseNavName:   relation.InverseNavName,
-				OnDeleteBehavior: relation.OnDeleteBehavior,
-				IsMany:           !relation.IsMany, // Inverse cardinality: one-to-many becomes many-to-one on the target
-				RelationType:     relation.RelationType,
-			})
+				targetEntity.RelationsIn = append(targetEntity.RelationsIn, IRRelation{
+					FieldName:        relation.FieldName,
+					TargetEntity:     irEntity,
+					NavigationName:   relation.NavigationName,
+					InverseNavName:   relation.InverseNavName,
+					OnDeleteBehavior: relation.OnDeleteBehavior,
+					IsMany:           !relation.IsMany, // Inverse cardinality: one-to-many becomes many-to-one on the target
+					RelationType:     relation.RelationType,
+				})
 			}
 		}
 	}
@@ -166,7 +168,7 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 			for _, targetRel := range rel.TargetEntity.RelationsOut {
 				if targetRel.IsMany && targetRel.TargetEntity != nil && targetRel.TargetEntity.Name == entity.Name {
 					// Use the field name (already plural in YAML) for collection navigations
-					rel.InverseNavName = pascalCase(targetRel.FieldName)
+					rel.InverseNavName = textutil.PascalCase(targetRel.FieldName)
 					break
 				}
 			}
@@ -200,7 +202,7 @@ func convertPermissions(source *parser.ParsedPermissions) *IRPermissions {
 	}
 }
 
-func resolveDatabaseType(database string, field *parser.ParsedField, schema *parser.ParsedSchema) string {
+func resolveDatabaseType(_ string, field *parser.ParsedField, schema *parser.ParsedSchema) string {
 	if field == nil || field.FieldDefinition == nil {
 		return "string"
 	}
@@ -210,7 +212,7 @@ func resolveDatabaseType(database string, field *parser.ParsedField, schema *par
 			for _, targetFieldName := range target.FieldOrder {
 				targetField := target.Fields[targetFieldName]
 				if targetField != nil && targetField.IsPrimary {
-					return resolveDatabaseType(database, targetField, schema)
+					return resolveDatabaseType("", targetField, schema)
 				}
 			}
 		}
@@ -218,55 +220,34 @@ func resolveDatabaseType(database string, field *parser.ParsedField, schema *par
 	}
 
 	if field.Type == "array" {
-		return resolveArrayType(database, field.TargetType)
+		return resolveArrayType("", field.TargetType)
 	}
 
 	if field.Type == "enum" {
+		// Store the raw enum name as defined in YAML — templates decide how to render it
+		// (e.g. PascalCase for C#/Java, snake_case for Python, etc.)
+		if field.TargetType != "" {
+			return field.TargetType
+		}
 		return "string"
 	}
 
-	// Return language-agnostic type names matching specmeta.FieldTypes
-	switch field.Type {
-	case "string", "text":
-		return "string"
-	case "uuid":
-		return "uuid"
-	case "json", "jsonb":
-		return "json"
-	case "int":
-		return "int"
-	case "bigint":
-		return "bigint"
-	case "float":
-		return "float"
-	case "decimal":
-		return "decimal"
-	case "boolean":
-		return "boolean"
-	case "date":
-		return "date"
-	case "datetime":
-		return "datetime"
-	default:
-		return "string"
+	if specmeta.IsPrimitive(field.Type) {
+		return field.Type
 	}
+	return "string"
 }
 
-func resolveArrayType(database string, targetType string) string {
-	switch strings.ToLower(targetType) {
-	case "int":
-		return "array(int)"
-	case "bigint":
-		return "array(bigint)"
-	case "float":
-		return "array(float)"
-	case "decimal":
-		return "array(decimal)"
-	case "boolean":
-		return "array(boolean)"
-	default:
-		return "array(string)"
+func resolveArrayType(_ string, targetType string) string {
+	inner := strings.ToLower(targetType)
+	if specmeta.IsPrimitive(inner) {
+		return "array(" + inner + ")"
 	}
+	// Enum type — store raw name
+	if targetType != "" {
+		return "array(" + targetType + ")"
+	}
+	return "array(string)"
 }
 
 func navigationName(field *parser.ParsedField) string {
@@ -276,7 +257,7 @@ func navigationName(field *parser.ParsedField) string {
 
 	name := field.Name
 	if field.IsMany {
-		name = singularize(name)
+		name = textutil.Singularize(name)
 	}
 	if strings.HasSuffix(strings.ToLower(name), "id") && len(name) > 2 {
 		name = name[:len(name)-2]
@@ -284,7 +265,7 @@ func navigationName(field *parser.ParsedField) string {
 	if name == "" {
 		name = field.RelationTarget
 	}
-	return pascalCase(name)
+	return textutil.PascalCase(name)
 }
 
 func normalizeDeleteBehavior(value string) string {
@@ -298,76 +279,6 @@ func normalizeDeleteBehavior(value string) string {
 	case "no_action":
 		return "NO ACTION"
 	default:
-		return strings.ToUpper(strings.ReplaceAll(value, "_", " "))
+		return strings.ToUpper(strings.NewReplacer("_", " ", "-", " ").Replace(value))
 	}
-}
-
-func pluralize(name string) string {
-	lower := strings.ToLower(name)
-	if strings.HasSuffix(lower, "y") && len(name) > 1 {
-		return name[:len(name)-1] + "ies"
-	}
-	if strings.HasSuffix(lower, "s") || strings.HasSuffix(lower, "x") || strings.HasSuffix(lower, "z") {
-		return name + "es"
-	}
-	return name + "s"
-}
-
-func singularize(name string) string {
-	lower := strings.ToLower(name)
-	if strings.HasSuffix(lower, "ies") && len(name) > 3 {
-		return name[:len(name)-3] + "y"
-	}
-	if strings.HasSuffix(lower, "ses") || strings.HasSuffix(lower, "xes") || strings.HasSuffix(lower, "zes") {
-		return name[:len(name)-2]
-	}
-	if strings.HasSuffix(lower, "s") && len(name) > 1 {
-		return name[:len(name)-1]
-	}
-	return name
-}
-
-func pascalCase(value string) string {
-	if value == "" {
-		return ""
-	}
-	parts := splitIdentifier(value)
-	for i := range parts {
-		if parts[i] == "" {
-			continue
-		}
-		parts[i] = strings.ToUpper(parts[i][:1]) + strings.ToLower(parts[i][1:])
-	}
-	return strings.Join(parts, "")
-}
-
-func splitIdentifier(value string) []string {
-	value = strings.ReplaceAll(value, "-", "_")
-	value = strings.ReplaceAll(value, " ", "_")
-	var parts []string
-	var current []rune
-	var previous rune
-	for i, r := range value {
-		if r == '_' {
-			if len(current) > 0 {
-				parts = append(parts, string(current))
-				current = current[:0]
-			}
-			previous = 0
-			continue
-		}
-		if i > 0 && unicode.IsUpper(r) && previous != 0 && unicode.IsLower(previous) {
-			parts = append(parts, string(current))
-			current = current[:0]
-		}
-		current = append(current, r)
-		previous = r
-	}
-	if len(current) > 0 {
-		parts = append(parts, string(current))
-	}
-	if len(parts) == 0 {
-		return []string{value}
-	}
-	return parts
 }

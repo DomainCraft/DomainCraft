@@ -3,8 +3,10 @@ package validator
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"domaincraft/internal/parser"
+	"domaincraft/internal/specmeta"
 )
 
 // ValidationError describes a logical validation error.
@@ -48,25 +50,52 @@ func (v *Validator) Validate() []ValidationError {
 
 		for _, fieldName := range entity.FieldOrder {
 			field := entity.Fields[fieldName]
-			if field == nil || !field.IsRelation {
+			if field == nil {
 				continue
 			}
 
-			if _, ok := v.schema.Entities[field.RelationTarget]; !ok {
-				errs = append(errs, ValidationError{
-					Entity:  entityName,
-					Field:   fieldName,
-					Message: fmt.Sprintf("relation target '%s' does not exist", field.RelationTarget),
-				})
-				continue
+			if field.IsRelation {
+				if _, ok := v.schema.Entities[field.RelationTarget]; !ok {
+					errs = append(errs, ValidationError{
+						Entity:  entityName,
+						Field:   fieldName,
+						Message: fmt.Sprintf("relation target '%s' does not exist", field.RelationTarget),
+					})
+					continue
+				}
+
+				if field.OnDelete == "set_null" && !field.IsOptional {
+					errs = append(errs, ValidationError{
+						Entity:  entityName,
+						Field:   fieldName,
+						Message: "on_delete:set_null requires optional field",
+					})
+				}
 			}
 
-			if field.OnDelete == "set_null" && !field.IsOptional {
-				errs = append(errs, ValidationError{
-					Entity:  entityName,
-					Field:   fieldName,
-					Message: "on_delete:set_null requires optional field",
-				})
+			if field.Type == "enum" {
+				if field.TargetType != "" {
+					if _, ok := v.schema.Enums[field.TargetType]; !ok {
+						errs = append(errs, ValidationError{
+							Entity:  entityName,
+							Field:   fieldName,
+							Message: fmt.Sprintf("enum '%s' is not defined in enums section", field.TargetType),
+						})
+					}
+				}
+			}
+
+			if field.Type == "array" && field.TargetType != "" {
+				inner := strings.ToLower(field.TargetType)
+				if !specmeta.IsPrimitive(inner) {
+					if _, ok := v.schema.Enums[field.TargetType]; !ok {
+						errs = append(errs, ValidationError{
+							Entity:  entityName,
+							Field:   fieldName,
+							Message: fmt.Sprintf("array element type '%s' is not a primitive or defined enum", field.TargetType),
+						})
+					}
+				}
 			}
 		}
 	}

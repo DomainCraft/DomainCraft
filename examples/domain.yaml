@@ -17,7 +17,7 @@ enums:
     - SHIPPED
     - DELIVERED
     - CANCELLED
-  
+
   ProductStatus:
     - DRAFT
     - PUBLISHED
@@ -34,6 +34,13 @@ enums:
     - Published
     - Archived
 
+  PaymentMethod:
+    - CreditCard
+    - DebitCard
+    - PayPal
+    - BankTransfer
+    - Crypto
+
 entities:
   User:
     features: [audit, soft_delete]
@@ -46,8 +53,16 @@ entities:
       avatar: string [optional, url]
       phoneNumbers: array(string)
       isActive: boolean [default:true]
-      role: enum(UserRole) [default:customer]
-    
+      role: enum(UserRole) [default:Customer]
+      lastLoginAt: datetime [optional]
+      dateOfBirth: date [optional]
+      loginCount: bigint [default:0]
+      rating: float [optional]
+      bio: text [optional]
+      tags: array(uuid) [optional]
+      favoriteDates: array(date) [optional]
+      metadata: jsonb [optional]
+
     permissions:
       read: [Admin, "*"]
       create: ["*"]
@@ -62,19 +77,30 @@ entities:
       description: text [optional]
       price: decimal [required, gte:0]
       stock: int [required, default:0]
+      weight: float [optional, gte:0]
       status: enum(ProductStatus) [default:DRAFT]
       categoryId: relation(Category) [optional, on_delete:set_null]
       supplierId: relation(User) [required, on_delete:restrict]
       tags: relation(Tag) [many]
       images: array(string)
       metadata: json [optional]
-    
+      availableSince: datetime [optional]
+      viewCount: bigint [default:0]
+      relatedProductIds: array(uuid) [optional]
+      supportedPaymentMethods: array(PaymentMethod) [optional]
+
     indexes:
       - fields: [status, categoryId]
         type: btree
       - fields: [title]
         type: btree
-    
+
+    permissions:
+      read: ["*"]
+      create: [Admin]
+      update: [Admin]
+      delete: [Admin]
+
     seed:
       - { id: "550e8400-e29b-41d4-a716-446655440000", title: "Sample Product", price: "9999", stock: 100, status: "DRAFT" }
 
@@ -87,6 +113,13 @@ entities:
       parentId: relation(Category) [optional, on_delete:set_null]
       slug: string [required, unique, regex:"^[a-z0-9-]+$"]
       isActive: boolean [default:true]
+      sortOrder: int [default:0]
+
+    permissions:
+      read: ["*"]
+      create: [Admin]
+      update: [Admin]
+      delete: [Admin]
 
   Order:
     features: [audit_log, soft_delete]
@@ -99,7 +132,12 @@ entities:
       notes: string [optional, max:1000]
       shippingAddress: json [optional]
       items: relation(OrderItem) [many]
-    
+      paidAt: datetime [optional]
+      subtotal: decimal [required, gte:0]
+      tax: decimal [optional, gte:0]
+      trackingNumbers: array(string) [optional]
+      estimatedDeliveryDates: array(datetime) [optional]
+
     permissions:
       read: [Admin, "@Owner"]
       create: [User]
@@ -116,6 +154,12 @@ entities:
       unitPrice: decimal [required, gte:0]
       discount: decimal [optional, default:0, gte:0, lt:100]
 
+    permissions:
+      read: [Admin, "@Owner"]
+      create: [User]
+      update: [Admin]
+      delete: [Admin]
+
   Tag:
     features: [audit]
     fields:
@@ -123,6 +167,13 @@ entities:
       name: string [required, unique, min:2, max:50]
       slug: string [required, unique, regex:"^[a-z0-9-]+$"]
       description: string [optional, max:200]
+      usageCount: bigint [default:0]
+
+    permissions:
+      read: ["*"]
+      create: [Admin]
+      update: [Admin]
+      delete: [Admin]
 
   Review:
     features: [audit_log, soft_delete]
@@ -135,11 +186,11 @@ entities:
       content: text [optional]
       isVerifiedPurchase: boolean [default:false]
       helpful: int [default:0]
-    
+
     indexes:
       - fields: [productId, rating]
-      - fields: [userId, createdAt]
-    
+      - fields: [userId, createdBy]
+
     permissions:
       read: ["*"]
       create: [User]
@@ -157,7 +208,10 @@ entities:
       authorId: relation(User) [required, on_delete:restrict]
       isPublished: boolean [default:false]
       internalNotes: string [hidden, optional]
-    
+      publishedAt: datetime [optional]
+      fileSize: bigint [default:0]
+      checksum: string [optional, max:64]
+
     permissions:
       read: [Admin, "@Owner"]
       read_public: "condition(isPublished == true)"
@@ -174,9 +228,30 @@ entities:
       slug: string [required, unique, regex:"^[a-z0-9-]+$"]
       isActive: boolean [default:true]
       ownerId: relation(User) [optional, on_delete:restrict]
+      sortOrder: int [default:0]
 
     permissions:
       read: [Admin, "*"]
+      create: [Admin]
+      update: [Admin]
+      delete: [Admin]
+
+  Payment:
+    features: [audit]
+    fields:
+      id: uuid [primary]
+      orderId: relation(Order) [required, on_delete:restrict]
+      amount: decimal [required, gt:0]
+      method: enum(PaymentMethod) [required]
+      status: string [required, default:"pending"]
+      transactionId: string [optional, unique, max:255]
+      paidAt: datetime [optional]
+      refundAmount: decimal [optional, gte:0]
+      metadata: jsonb [optional]
+      attemptCount: int [default:1]
+
+    permissions:
+      read: [Admin, "@Owner"]
       create: [Admin]
       update: [Admin]
       delete: [Admin]
