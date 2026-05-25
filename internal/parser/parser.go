@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"domaincraft/internal/lexer"
-	"domaincraft/internal/specmeta"
-	"domaincraft/pkg/textutil"
+	"github.com/DomainCraft/DomainCraft/internal/lexer"
+	"github.com/DomainCraft/DomainCraft/internal/specmeta"
+	"github.com/DomainCraft/DomainCraft/pkg/textutil"
 )
 
 // Parser is the main parser for converting RawSchema to ParsedSchema

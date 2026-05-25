@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"domaincraft/internal/parser"
-	"domaincraft/internal/specmeta"
+	"github.com/DomainCraft/DomainCraft/internal/parser"
+	"github.com/DomainCraft/DomainCraft/internal/specmeta"
 )
 
 // ValidationError describes a logical validation error.

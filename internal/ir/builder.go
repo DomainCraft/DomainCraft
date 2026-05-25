@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"domaincraft/internal/parser"
-	"domaincraft/internal/specmeta"
-	"domaincraft/pkg/textutil"
+	"github.com/DomainCraft/DomainCraft/internal/parser"
+	"github.com/DomainCraft/DomainCraft/internal/specmeta"
+	"github.com/DomainCraft/DomainCraft/pkg/textutil"
 )
 
 // Builder converts ParsedSchema into IRProject.

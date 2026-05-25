@@ -4,8 +4,8 @@ package testutil
 import (
 	"testing"
 
-	"domaincraft/internal/lexer"
-	"domaincraft/internal/parser"
+	"github.com/DomainCraft/DomainCraft/internal/lexer"
+	"github.com/DomainCraft/DomainCraft/internal/parser"
 )
 
 // MustParsedField parses a field definition string and returns a *ParsedField.

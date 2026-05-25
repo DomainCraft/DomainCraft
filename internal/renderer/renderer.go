@@ -11,9 +11,9 @@ import (
 	"text/template"
 	"time"
 
-	"domaincraft/internal/ir"
-	"domaincraft/internal/specmeta"
-	"domaincraft/pkg/textutil"
+	"github.com/DomainCraft/DomainCraft/internal/ir"
+	"github.com/DomainCraft/DomainCraft/internal/specmeta"
+	"github.com/DomainCraft/DomainCraft/pkg/textutil"
 
 	"github.com/Masterminds/sprig/v3"
 	"gopkg.in/yaml.v3"

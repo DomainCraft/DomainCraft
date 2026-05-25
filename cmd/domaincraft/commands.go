@@ -7,12 +7,12 @@ import (
 	"os"
 	"strings"
 
-	"domaincraft/internal/bridge"
-	"domaincraft/internal/interactive"
-	"domaincraft/internal/ir"
-	"domaincraft/internal/parser"
-	"domaincraft/internal/renderer"
-	"domaincraft/internal/validator"
+	"github.com/DomainCraft/DomainCraft/internal/bridge"
+	"github.com/DomainCraft/DomainCraft/internal/interactive"
+	"github.com/DomainCraft/DomainCraft/internal/ir"
+	"github.com/DomainCraft/DomainCraft/internal/parser"
+	"github.com/DomainCraft/DomainCraft/internal/renderer"
+	"github.com/DomainCraft/DomainCraft/internal/validator"
 
 	"github.com/spf13/cobra"
 )

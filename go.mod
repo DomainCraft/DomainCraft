@@ -1,4 +1,4 @@
-module domaincraft
+module github.com/DomainCraft/DomainCraft
 
 go 1.25.0
 

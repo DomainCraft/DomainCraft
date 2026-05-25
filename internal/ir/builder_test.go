@@ -3,8 +3,8 @@ package ir
 import (
 	"testing"
 
-	"domaincraft/internal/parser"
-	"domaincraft/internal/testutil"
+	"github.com/DomainCraft/DomainCraft/internal/parser"
+	"github.com/DomainCraft/DomainCraft/internal/testutil"
 )
 
 func TestBuildCreatesRelations(t *testing.T) {

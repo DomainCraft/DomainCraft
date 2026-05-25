@@ -1,6 +1,6 @@
 package renderer
 
-import "domaincraft/internal/ir"
+import "github.com/DomainCraft/DomainCraft/internal/ir"
 
 // BridgeConfig describes bridge.yaml.
 type BridgeConfig struct {

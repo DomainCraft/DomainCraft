@@ -36,7 +36,7 @@ The output is a complete, compilable project -- entities, repositories, controll
 **Go** (any OS):
 
 ```bash
-go install domaincraft/cmd/domaincraft@latest
+go install github.com/DomainCraft/DomainCraft/cmd/domaincraft@latest
 ```
 
 **Or** download the binary for your platform from [Releases](https://github.com/DomainCraft/DomainCraft/releases), rename to `domaincraft` (or `domaincraft.exe` on Windows), and place it anywhere in your PATH.

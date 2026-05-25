@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"domaincraft/internal/bridge"
+	"github.com/DomainCraft/DomainCraft/internal/bridge"
 
 	"github.com/charmbracelet/huh"
 	"golang.org/x/term"

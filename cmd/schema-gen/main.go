@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"domaincraft/internal/specmeta"
+	"github.com/DomainCraft/DomainCraft/internal/specmeta"
 )
 
 func main() {

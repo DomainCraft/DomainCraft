@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"domaincraft/internal/parser"
-	"domaincraft/internal/testutil"
+	"github.com/DomainCraft/DomainCraft/internal/parser"
+	"github.com/DomainCraft/DomainCraft/internal/testutil"
 )
 
 func TestValidateDetectsMissingPrimaryKey(t *testing.T) {

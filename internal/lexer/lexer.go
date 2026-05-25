@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"domaincraft/internal/specmeta"
+	"github.com/DomainCraft/DomainCraft/internal/specmeta"
 )
 
 // FieldDefinition represents a parsed field definition

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"domaincraft/internal/ir"
+	"github.com/DomainCraft/DomainCraft/internal/ir"
 )
 
 func TestRenderEntityTemplate(t *testing.T) {
