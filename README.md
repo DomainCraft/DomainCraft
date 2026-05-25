@@ -1,4 +1,4 @@
-# DomainCraft Core
+# DomainCraft
 
 **Define your domain model once in YAML. Get fully working code for any language.**
 
@@ -6,29 +6,86 @@ DomainCraft is a domain-driven code generator. You describe your entities, relat
 
 ```yaml
 # domain.yaml -- that's all you write
-Project:
+project:
   name: MyShop
 
-Product:
-  fields:
-    id: uuid [primary]
-    title: string [required, min:3, max:200]
-    price: decimal [required, gte:0]
-    categoryId: relation(Category) [optional, on_delete:set_null]
-  features: [audit, soft_delete]
-  permissions:
-    read: ["*"]
-    create: [Admin]
-    update: ["@Owner", Admin]
-    delete: [Admin]
+entities:
+  Product:
+    features: [audit, soft_delete]
+    fields:
+      id: uuid [primary]
+      title: string [required, min:3, max:200]
+      price: decimal [required, gte:0]
+      categoryId: relation(Category) [optional, on_delete:set_null]
+    permissions:
+      read: ["*"]
+      create: [Admin]
+      update: ["@Owner", Admin]
+      delete: [Admin]
 ```
 
 ```bash
 # That's all you run
-domaincraft generate --domain domain.yaml --bridge ../DomainCraftCsharp --output ./generated
+domaincraft generate
 ```
 
 The output is a complete, compilable project -- entities, repositories, controllers, configurations, Docker setup, everything.
+
+## Installation
+
+**Go** (any OS):
+
+```bash
+go install domaincraft/cmd/domaincraft@latest
+```
+
+**Or** download the binary for your platform from [Releases](https://github.com/DomainCraft/DomainCraft/releases), rename to `domaincraft` (or `domaincraft.exe` on Windows), and place it anywhere in your PATH.
+
+**From source** (for contributors):
+
+```bash
+git clone https://github.com/DomainCraft/DomainCraft.git
+cd DomainCraft
+make install
+```
+
+That's it. Run `domaincraft` to get started.
+
+## Quick Start
+
+### Create a new project
+
+```bash
+domaincraft new
+```
+
+The interactive wizard guides you through:
+- Project name
+- Target bridge (C#, Java, TypeScript, ...)
+- Database engine
+- Authentication method
+- API style
+
+It creates a starter `domain.yaml` that you can edit to define your entities.
+
+### Generate code
+
+```bash
+# Interactive -- select bridge from a menu
+domaincraft generate
+
+# Or specify directly
+domaincraft generate --bridge csharp-restful --output ./generated
+
+# Or use a local bridge directory
+domaincraft generate --bridge ../my-bridge --output ./generated
+```
+
+### Validate
+
+```bash
+domaincraft validate --domain domain.yaml
+```
 
 ## Why This Approach
 
@@ -57,39 +114,6 @@ domain.yaml --> Parser --> Lexer --> Validator --> IR Builder --> Renderer --> G
 5. **Renderer** applies bridge templates to the IR and writes files to disk
 
 The **Intermediate Representation (IR)** is the key design decision. It's a language-agnostic graph of your domain that templates consume. This means the core never needs to know about C#, Java, TypeScript, or any other language -- bridges handle all language-specific concerns.
-
-## Quick Start
-
-### Build
-
-```bash
-git clone https://github.com/DomainCraft/domaincraft-bridge-csharp.git
-cd domaincraft
-make install-deps
-make build
-```
-
-### Generate
-
-```bash
-# Validate your domain
-make cli-validate DOMAIN=domain.yaml
-
-# Generate code using a bridge
-make cli-generate DOMAIN=domain.yaml BRIDGE=../DomainCraftCsharp OUTPUT=generated
-
-# Or create a starter domain.yaml
-make cli-init
-```
-
-### Test
-
-```bash
-make test               # Run all tests
-make test-verbose       # Verbose output
-make test-coverage      # Coverage report
-make lint               # go vet ./...
-```
 
 ## What You Can Define
 
@@ -181,31 +205,34 @@ seed:
 
 A **bridge** is a directory containing Go templates and configuration that tells DomainCraft how to generate code for a specific language and framework. Bridges are completely decoupled from the core -- you can create your own without modifying any Go code.
 
-### Existing Bridges
+### Available Bridges
 
 | Bridge | Language/Framework | Status |
 |--------|-------------------|--------|
-| [DomainCraftCsharp](https://github.com/DomainCraft/domaincraft-bridge-csharp) | C# / ASP.NET Core / EF Core / PostgreSQL | Ready |
+| [csharp-restful](https://github.com/DomainCraft/domaincraft-bridge-csharp) | C# / ASP.NET Core / EF Core / PostgreSQL | Ready |
 | domaincraft-bridge-java | Java / Spring Boot | Planned |
 | domaincraft-bridge-typescript | TypeScript / Express / Prisma | Planned |
 
-### Bridge Structure
+List installed and available bridges:
 
-```
-my-bridge/
-├── bridge.yaml           # Template manifest and metadata
-├── type_mappings.yaml    # IR type -> target language type mapping
-└── templates/
-    ├── entity.tmpl
-    ├── controller.tmpl
-    └── ...
+```bash
+domaincraft bridges
 ```
 
 ### Use a Bridge
 
 ```bash
-domaincraft generate --domain domain.yaml --bridge ./my-bridge --output generated
+# By registry ID (auto-downloads and caches)
+domaincraft generate --bridge csharp-restful
+
+# By local path
+domaincraft generate --bridge ./my-bridge
+
+# By GitHub shorthand
+domaincraft generate --bridge DomainCraft/domaincraft-bridge-csharp
 ```
+
+Bridges from the registry are cached in `~/.domaincraft/bridges/`.
 
 ### Create Your Own Bridge
 
@@ -218,14 +245,18 @@ DomainCraft/
 ├── cmd/
 │   ├── parser/             # CLI entry point (Cobra)
 │   │   ├── main.go
-│   │   └── commands.go     # validate, generate, init commands
+│   │   └── commands.go     # new, validate, generate, bridges commands
 │   └── schema-gen/         # JSON schema generator for IDE autocomplete
 ├── internal/
 │   ├── parser/             # YAML parsing -> ParsedSchema
 │   ├── lexer/              # Field string parsing -> FieldDefinition
 │   ├── validator/          # Logical consistency checks
 │   ├── ir/                 # Intermediate Representation builder
-│   └── renderer/           # Template rendering engine
+│   ├── renderer/           # Template rendering engine
+│   ├── bridge/             # Bridge registry and resolver
+│   └── interactive/        # Interactive CLI prompts (huh)
+├── scripts/
+│   └── install.sh          # One-liner installer
 ├── pkg/
 │   └── logger/             # Console output formatting
 ├── spec/
@@ -236,7 +267,39 @@ DomainCraft/
 └── CONTRIBUTING.md
 ```
 
-## Advanced: Programmatic Usage
+## CLI Reference
+
+```
+domaincraft new              # Create a new project (interactive wizard)
+domaincraft generate         # Generate code from domain.yaml
+domaincraft validate         # Validate domain.yaml
+domaincraft bridges          # List available bridges
+
+# Flags
+--domain, -d     Path to domain.yaml (default: domain.yaml)
+--bridge, -b     Bridge ID, path, or owner/repo
+--output, -o     Output directory (default: generated)
+--non-interactive  Disable interactive prompts (for CI/scripts)
+--name           Project name (for 'new' command)
+--database       Database type (postgresql, mysql, sqlite, mssql, mongodb)
+--auth           Auth type (jwt, none)
+--api-style      API style (rest, graphql, grpc)
+```
+
+## For Developers
+
+If you want to work on DomainCraft itself:
+
+```bash
+git clone https://github.com/DomainCraft/DomainCraft.git
+cd DomainCraft
+make build          # Build binary to bin/domaincraft
+make test           # Run all tests
+make lint           # go vet
+make fmt            # gofmt
+```
+
+### Programmatic Usage
 
 ```go
 package main

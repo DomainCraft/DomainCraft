@@ -6,7 +6,7 @@ This guide applies to the core parser and to any bridge template repository, reg
 
 ### Prerequisites
 
-- Go 1.21+
+- Go 1.25+
 - Git
 
 ### Clone and Build
@@ -15,7 +15,7 @@ This guide applies to the core parser and to any bridge template repository, reg
 git clone https://github.com/your-org/domaincraft.git
 cd domaincraft
 make install-deps   # go mod download && go mod tidy
-make build          # builds to bin/parser
+make build          # builds to bin/domaincraft
 ```
 
 ### Run Tests
@@ -33,7 +33,7 @@ make fmt                # go fmt ./...
 ```bash
 make cli-validate DOMAIN=path/to/domain.yaml
 # or directly:
-go run ./cmd/parser validate --domain domain.yaml
+go run ./cmd/domaincraft validate --domain domain.yaml
 ```
 
 ### Generate Code
@@ -41,7 +41,7 @@ go run ./cmd/parser validate --domain domain.yaml
 ```bash
 make cli-generate DOMAIN=domain.yaml BRIDGE=../DomainCraftCsharp OUTPUT=generated
 # or directly:
-go run ./cmd/parser generate --domain domain.yaml --bridge /path/to/bridge --output generated
+go run ./cmd/domaincraft generate --domain domain.yaml --bridge /path/to/bridge --output generated
 ```
 
 The `--bridge` flag accepts:
@@ -53,7 +53,7 @@ The `--bridge` flag accepts:
 ```bash
 make cli-init
 # or:
-go run ./cmd/parser init
+go run ./cmd/domaincraft init
 ```
 
 ---
@@ -261,12 +261,12 @@ For `for: project` templates:
 
 1. **Validate the domain YAML:**
    ```bash
-   go run ./cmd/parser validate --domain examples/domain.yaml
+   go run ./cmd/domaincraft validate --domain examples/domain.yaml
    ```
 
 2. **Generate code:**
    ```bash
-   go run ./cmd/parser generate \
+   go run ./cmd/domaincraft generate \
      --domain examples/domain.yaml \
      --bridge ./my-bridge \
      --output ./test-output
@@ -283,7 +283,7 @@ For `for: project` templates:
    # In .github/workflows/ci.yml
    - name: Test bridge
      run: |
-       go run ./cmd/parser generate \
+       go run ./cmd/domaincraft generate \
          --domain examples/domain.yaml \
          --bridge ./my-bridge \
          --output ./test-output
