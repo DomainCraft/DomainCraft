@@ -56,9 +56,3 @@ func (r *Resolver) Resolve(input string) (string, error) {
 
 	return "", fmt.Errorf("bridge %q not found: not a local path, registry ID, or owner/repo", input)
 }
-
-// ResolveOrSelect resolves the bridge input, or returns ("", nil) to signal
-// the caller should run interactive selection.
-func (r *Resolver) ResolveOrSelect(input string) (string, error) {
-	return r.Resolve(input)
-}

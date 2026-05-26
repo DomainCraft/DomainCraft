@@ -1,6 +1,6 @@
 package ir
 
-import "strings"
+import "github.com/DomainCraft/DomainCraft/internal/specmeta"
 
 // IRProject represents the intermediate project model.
 type IRProject struct {
@@ -102,7 +102,7 @@ func (e IREntity) HasFeature(name string) bool {
 
 // IsArray returns true if the field's DatabaseType is an array type (e.g. "array(int)").
 func (f IRField) IsArray() bool {
-	return strings.HasPrefix(f.DatabaseType, "array(")
+	return specmeta.IsArrayType(f.DatabaseType)
 }
 
 // ArrayElementType returns the inner type of an array field (e.g. "int" from "array(int)").
@@ -111,7 +111,7 @@ func (f IRField) ArrayElementType() string {
 	if !f.IsArray() {
 		return ""
 	}
-	return strings.TrimSuffix(strings.TrimPrefix(f.DatabaseType, "array("), ")")
+	return specmeta.ParseArrayInner(f.DatabaseType)
 }
 
 // IRValidation represents one validation rule.

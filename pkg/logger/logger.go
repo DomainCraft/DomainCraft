@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -181,14 +182,12 @@ func (l *Logger) Table(headers []string, rows [][]string) {
 
 	// Print separator
 	for i, w := range colWidths {
-		for j := 0; j < w; j++ {
-			fmt.Fprintf(l.writer, "-")
-		}
+		fmt.Fprint(l.writer, strings.Repeat("-", w))
 		if i < len(colWidths)-1 {
-			fmt.Fprintf(l.writer, "  ")
+			fmt.Fprint(l.writer, "  ")
 		}
 	}
-	fmt.Fprintf(l.writer, "\n")
+	fmt.Fprint(l.writer, "\n")
 
 	// Print rows
 	for _, row := range rows {

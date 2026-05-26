@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/DomainCraft/DomainCraft/internal/bridge"
+	"github.com/DomainCraft/DomainCraft/internal/specmeta"
 
 	"github.com/charmbracelet/huh"
 	"golang.org/x/term"
@@ -76,12 +77,13 @@ func PromptProjectName() (string, error) {
 // PromptDatabase asks for the database type interactively.
 func PromptDatabase() (string, error) {
 	var db string
-	options := []huh.Option[string]{
-		huh.NewOption("PostgreSQL (recommended)", "postgresql"),
-		huh.NewOption("MySQL", "mysql"),
-		huh.NewOption("SQLite", "sqlite"),
-		huh.NewOption("MS SQL Server", "mssql"),
-		huh.NewOption("MongoDB", "mongodb"),
+	options := make([]huh.Option[string], len(specmeta.Databases))
+	for i, d := range specmeta.Databases {
+		label := d
+		if i == 0 {
+			label += " (recommended)"
+		}
+		options[i] = huh.NewOption(label, d)
 	}
 	form := huh.NewForm(
 		huh.NewGroup(
@@ -123,10 +125,13 @@ func PromptAuth() (string, error) {
 // PromptAPIStyle asks for the API style interactively.
 func PromptAPIStyle() (string, error) {
 	var style string
-	options := []huh.Option[string]{
-		huh.NewOption("REST (recommended)", "rest"),
-		huh.NewOption("GraphQL", "graphql"),
-		huh.NewOption("gRPC", "grpc"),
+	options := make([]huh.Option[string], len(specmeta.APIStyles))
+	for i, s := range specmeta.APIStyles {
+		label := s
+		if i == 0 {
+			label += " (recommended)"
+		}
+		options[i] = huh.NewOption(label, s)
 	}
 	form := huh.NewForm(
 		huh.NewGroup(

@@ -2,6 +2,7 @@ package ir
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/DomainCraft/DomainCraft/internal/parser"
@@ -76,7 +77,7 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 
 			irEntity.Fields = append(irEntity.Fields, IRField{
 				Name:           field.Name,
-				DatabaseType:   resolveDatabaseType(schema.Database, field, schema),
+				DatabaseType:   resolveDatabaseType(field, schema),
 				NavigationName: navigationName(field),
 				IsPrimary:      field.IsPrimary,
 				IsNullable:     field.IsOptional,
@@ -198,9 +199,14 @@ func convertValidations(source map[string]string) []IRValidation {
 	if len(source) == 0 {
 		return nil
 	}
+	keys := make([]string, 0, len(source))
+	for key := range source {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
 	result := make([]IRValidation, 0, len(source))
-	for key, value := range source {
-		result = append(result, IRValidation{Name: key, Value: value})
+	for _, key := range keys {
+		result = append(result, IRValidation{Name: key, Value: source[key]})
 	}
 	return result
 }
@@ -218,7 +224,7 @@ func convertPermissions(source *parser.ParsedPermissions) *IRPermissions {
 	}
 }
 
-func resolveDatabaseType(_ string, field *parser.ParsedField, schema *parser.ParsedSchema) string {
+func resolveDatabaseType(field *parser.ParsedField, schema *parser.ParsedSchema) string {
 	if field == nil || field.FieldDefinition == nil {
 		return "string"
 	}
@@ -228,7 +234,7 @@ func resolveDatabaseType(_ string, field *parser.ParsedField, schema *parser.Par
 			for _, targetFieldName := range target.FieldOrder {
 				targetField := target.Fields[targetFieldName]
 				if targetField != nil && targetField.IsPrimary {
-					return resolveDatabaseType("", targetField, schema)
+					return resolveDatabaseType(targetField, schema)
 				}
 			}
 		}
@@ -236,7 +242,7 @@ func resolveDatabaseType(_ string, field *parser.ParsedField, schema *parser.Par
 	}
 
 	if field.Type == "array" {
-		return resolveArrayType("", field.TargetType)
+		return resolveArrayType(field.TargetType)
 	}
 
 	if field.Type == "enum" {
@@ -254,7 +260,7 @@ func resolveDatabaseType(_ string, field *parser.ParsedField, schema *parser.Par
 	return "string"
 }
 
-func resolveArrayType(_ string, targetType string) string {
+func resolveArrayType(targetType string) string {
 	inner := strings.ToLower(targetType)
 	if specmeta.IsPrimitive(inner) {
 		return "array(" + inner + ")"

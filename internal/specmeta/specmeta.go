@@ -45,15 +45,10 @@ var MetaFieldTypes = []string{
 // Derived from PrimitiveFieldTypes + MetaFieldTypes so there is a single source of truth.
 var FieldTypes = append(append([]string{}, PrimitiveFieldTypes...), MetaFieldTypes...)
 
-// FeatureFieldNames maps auto-generated field names to the feature that creates them.
-// Used by renderer's isFeatureField and parser's addFeatureFields.
-var FeatureFieldNames = map[string]string{
-	"createdAt": "audit",
-	"updatedAt": "audit",
-	"createdBy": "audit_log",
-	"updatedBy": "audit_log",
-	"deletedAt": "soft_delete",
-	"version":   "optimistic_lock",
+// FeatureFieldNames returns the set of auto-generated feature field names.
+// Derived from FeatureFieldDefs so there is a single source of truth.
+func FeatureFieldNames() map[string]bool {
+	return featureFieldNames
 }
 
 // FeatureFieldDefs is the single source of truth for auto-injected feature fields.
@@ -89,10 +84,21 @@ var NumericFieldTypes = []string{
 
 var primitiveSet map[string]bool
 var numericSet map[string]bool
+var fieldTypeSet map[string]bool
+var onDeleteSet map[string]bool
+var featureSet map[string]bool
+var featureFieldNames map[string]bool
 
 func init() {
 	primitiveSet = SliceToSet(PrimitiveFieldTypes)
 	numericSet = SliceToSet(NumericFieldTypes)
+	fieldTypeSet = SliceToSet(FieldTypes)
+	onDeleteSet = SliceToSet(OnDeleteValues)
+	featureSet = SliceToSet(Features)
+	featureFieldNames = make(map[string]bool, len(FeatureFieldDefs))
+	for name := range FeatureFieldDefs {
+		featureFieldNames[name] = true
+	}
 }
 
 // IsPrimitive returns true if the type name is a built-in scalar (not an enum, array, or relation).
@@ -103,6 +109,21 @@ func IsPrimitive(typeName string) bool {
 // IsNumeric returns true if the type name is a numeric scalar (int, bigint, float, decimal).
 func IsNumeric(typeName string) bool {
 	return numericSet[typeName]
+}
+
+// IsFieldType returns true if the type name is a valid field type keyword.
+func IsFieldType(typeName string) bool {
+	return fieldTypeSet[typeName]
+}
+
+// IsOnDeleteValue returns true if the value is a valid on_delete behavior.
+func IsOnDeleteValue(value string) bool {
+	return onDeleteSet[value]
+}
+
+// IsFeature returns true if the name is a valid feature.
+func IsFeature(name string) bool {
+	return featureSet[name]
 }
 
 // SliceToSet converts a string slice to a set (map[string]bool) for O(1) lookups.

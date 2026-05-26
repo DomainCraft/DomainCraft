@@ -160,12 +160,6 @@ func runNonInteractiveNew(cmd *cobra.Command) error {
 }
 
 func scaffoldDomainYAML(path, name, version, database, auth, apiStyle string) error {
-	if _, err := os.Stat(path); err == nil {
-		return fmt.Errorf("%s already exists — remove it first or choose a different output directory", path)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-
 	content := fmt.Sprintf(`project:
   name: %s
   version: %s
@@ -183,7 +177,19 @@ entities:
       name: string [required]
 `, name, version, database, auth, apiStyle)
 
-	return os.WriteFile(path, []byte(content), 0o644)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("%s already exists — remove it first or choose a different output directory", path)
+		}
+		return err
+	}
+	_, writeErr := f.Write([]byte(content))
+	closeErr := f.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	return closeErr
 }
 
 // --- validate ---

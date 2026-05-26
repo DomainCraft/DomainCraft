@@ -110,10 +110,9 @@ func (p *Parser) parseEntity(name string, raw RawEntity) (*ParsedEntity, error) 
 	}
 
 	// Parse features (behavior macros)
-	featureSet := specmeta.SliceToSet(specmeta.Features)
 	for _, feature := range raw.Features {
 		feature = strings.TrimSpace(feature)
-		if !featureSet[feature] {
+		if !specmeta.IsFeature(feature) {
 			return nil, fmt.Errorf("unknown feature: %s", feature)
 		}
 		entity.Features[feature] = true
@@ -124,14 +123,23 @@ func (p *Parser) parseEntity(name string, raw RawEntity) (*ParsedEntity, error) 
 		return nil, err
 	}
 
-	// Parse fields
-	for fieldName, fieldDef := range raw.Fields {
+	// Parse fields in sorted order for deterministic output.
+	fieldNames := make([]string, 0, len(raw.Fields))
+	for fieldName := range raw.Fields {
+		fieldNames = append(fieldNames, fieldName)
+	}
+	sort.Strings(fieldNames)
+	for _, fieldName := range fieldNames {
+		fieldDef := raw.Fields[fieldName]
 		field, err := p.parseField(fieldName, fieldDef)
 		if err != nil {
 			return nil, err
 		}
 		entity.Fields[fieldName] = field
-		entity.FieldOrder = append(entity.FieldOrder, fieldName)
+		// Skip if already added by addFeatureFields (user overriding a feature field).
+		if _, alreadyPresent := specmeta.FeatureFieldDefs[fieldName]; !alreadyPresent {
+			entity.FieldOrder = append(entity.FieldOrder, fieldName)
+		}
 	}
 
 	// Parse indexes
@@ -187,15 +195,18 @@ func (p *Parser) parseField(name string, fieldDef string) (*ParsedField, error) 
 // addFeatureFields adds automatic fields based on entity features.
 // Uses specmeta.FeatureFieldDefs as the single source of truth.
 func (p *Parser) addFeatureFields(entity *ParsedEntity) error {
-	for _, fieldName := range []string{"createdAt", "updatedAt", "createdBy", "updatedBy", "deletedAt", "version"} {
-		def, ok := specmeta.FeatureFieldDefs[fieldName]
-		if !ok {
-			continue
-		}
+	// Iterate in sorted order for deterministic field generation.
+	names := make([]string, 0, len(specmeta.FeatureFieldDefs))
+	for name := range specmeta.FeatureFieldDefs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, fieldName := range names {
+		def := specmeta.FeatureFieldDefs[fieldName]
 		if !entity.Features[def.Feature] {
 			continue
 		}
-		entity.Fields[fieldName] = newFeatureField(fieldName, def.Type, def.DBColumn, def.IsFuncDefault, def.DefaultValue)
+		entity.Fields[fieldName] = newFeatureField(def)
 		if def.IsOptional {
 			entity.Fields[fieldName].IsOptional = true
 		}
@@ -205,18 +216,18 @@ func (p *Parser) addFeatureFields(entity *ParsedEntity) error {
 }
 
 // newFeatureField creates a ParsedField for an auto-generated feature field.
-func newFeatureField(name, typ, dbCol string, isFuncDefault bool, defaultVal string) *ParsedField {
+func newFeatureField(def specmeta.FeatureFieldDef) *ParsedField {
 	fd := &lexer.FieldDefinition{
-		Name:         name,
-		Type:         typ,
-		IsRequired:   true,
-		Validations:  make(map[string]string),
-		DefaultValue: defaultVal,
-		DefaultIsFunc: isFuncDefault,
+		Name:          "",
+		Type:          def.Type,
+		IsRequired:    true,
+		Validations:   make(map[string]string),
+		DefaultValue:  def.DefaultValue,
+		DefaultIsFunc: def.IsFuncDefault,
 	}
 	return &ParsedField{
 		FieldDefinition:    fd,
-		DatabaseColumnName: dbCol,
+		DatabaseColumnName: def.DBColumn,
 	}
 }
 
@@ -237,16 +248,10 @@ func extractStringList(raw map[string]interface{}, key string) []string {
 	return result
 }
 
-// toDatabaseColumnName converts camelCase to snake_case
+// toDatabaseColumnName converts camelCase/PascalCase to snake_case.
+// Uses textutil.SplitIdentifier to correctly handle acronyms (e.g. "HTTPPort" -> "http_port").
 func toDatabaseColumnName(fieldName string) string {
-	var result strings.Builder
-	for i, r := range fieldName {
-		if i > 0 && r >= 'A' && r <= 'Z' {
-			result.WriteByte('_')
-		}
-		result.WriteRune(r)
-	}
-	return strings.ToLower(result.String())
+	return strings.ToLower(strings.Join(textutil.SplitIdentifier(fieldName), "_"))
 }
 
 // generateIndexName generates an index name from entity name and fields

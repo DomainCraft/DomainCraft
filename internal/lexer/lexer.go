@@ -115,9 +115,7 @@ func (l *Lexer) parseType(typeStr string, fd *FieldDefinition) error {
 	}
 
 	// Built-in types
-	validTypes := specmeta.SliceToSet(specmeta.FieldTypes)
-
-	if !validTypes[typeStr] {
+	if !specmeta.IsFieldType(typeStr) {
 		return fmt.Errorf("unknown type: %s. valid types: string, int, uuid, relation, array, enum, json, text, etc.", typeStr)
 	}
 
@@ -156,8 +154,7 @@ func (l *Lexer) parseModifiers(modStr string, fd *FieldDefinition) error {
 					fd.DefaultValue = value
 				}
 			case "on_delete":
-				validOnDelete := specmeta.SliceToSet(specmeta.OnDeleteValues)
-				if !validOnDelete[value] {
+				if !specmeta.IsOnDeleteValue(value) {
 					return fmt.Errorf("unknown on_delete value: %s. valid: cascade, set_null, restrict, no_action", value)
 				}
 				fd.OnDelete = value

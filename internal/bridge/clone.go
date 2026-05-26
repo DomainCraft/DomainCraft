@@ -7,9 +7,13 @@ import (
 	"path/filepath"
 )
 
-// BridgeCacheDir returns ~/.domaincraft/bridges/
+// BridgeCacheDir returns ~/.domaincraft/bridges/.
+// Falls back to .domaincraft/bridges in the current directory if the home directory is unavailable.
 func BridgeCacheDir() string {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return filepath.Join(".domaincraft", "bridges")
+	}
 	return filepath.Join(home, ".domaincraft", "bridges")
 }
 
@@ -57,23 +61,9 @@ func CloneBridge(entry RegistryEntry) error {
 
 	url := fmt.Sprintf("https://github.com/%s.git", entry.GitHub)
 	cmd := exec.Command("git", "clone", "--depth", "1", url, cacheDir)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if out, err := cmd.CombinedOutput(); err != nil {
 		os.RemoveAll(cacheDir)
-		return fmt.Errorf("clone %s: %w", url, err)
+		return fmt.Errorf("clone %s: %w: %s", url, err, out)
 	}
 	return nil
-}
-
-// UpdateCache pulls the latest changes for a cached bridge.
-func UpdateCache(entry RegistryEntry) error {
-	cacheDir := CachePath(entry)
-	if !IsCached(entry) {
-		return CloneBridge(entry)
-	}
-	cmd := exec.Command("git", "-C", cacheDir, "pull", "--ff-only")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
 }

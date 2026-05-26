@@ -2,6 +2,7 @@ package validator
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -38,6 +39,18 @@ func (v *Validator) Validate() []ValidationError {
 	}
 
 	var errs []ValidationError
+
+	// Validate project-level configuration values.
+	if v.schema.Database != "" && !slices.Contains(specmeta.Databases, v.schema.Database) {
+		errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("unknown database %q; allowed: %s", v.schema.Database, strings.Join(specmeta.Databases, ", "))})
+	}
+	if v.schema.Auth != "" && v.schema.Auth != "jwt" && v.schema.Auth != "none" {
+		errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("unknown auth %q; allowed: jwt, none", v.schema.Auth)})
+	}
+	if v.schema.APIStyle != "" && !slices.Contains(specmeta.APIStyles, v.schema.APIStyle) {
+		errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("unknown api_style %q; allowed: %s", v.schema.APIStyle, strings.Join(specmeta.APIStyles, ", "))})
+	}
+
 	for _, entityName := range v.schema.EntityOrder {
 		entity := v.schema.Entities[entityName]
 		if entity == nil {
@@ -95,6 +108,32 @@ func (v *Validator) Validate() []ValidationError {
 							Message: fmt.Sprintf("array element type '%s' is not a primitive or defined enum", field.TargetType),
 						})
 					}
+				}
+			}
+		}
+
+		// Validate index field names exist in the entity.
+		for i, idx := range entity.Indexes {
+			for _, idxField := range idx.Fields {
+				if _, ok := entity.Fields[idxField]; !ok {
+					errs = append(errs, ValidationError{
+						Entity:  entityName,
+						Field:   idxField,
+						Message: fmt.Sprintf("index %d references unknown field '%s'", i, idxField),
+					})
+				}
+			}
+		}
+
+		// Validate seed data field names exist in the entity.
+		for i, seedEntry := range entity.Seed {
+			for seedField := range seedEntry {
+				if _, ok := entity.Fields[seedField]; !ok {
+					errs = append(errs, ValidationError{
+						Entity:  entityName,
+						Field:   seedField,
+						Message: fmt.Sprintf("seed entry %d references unknown field '%s'", i, seedField),
+					})
 				}
 			}
 		}
