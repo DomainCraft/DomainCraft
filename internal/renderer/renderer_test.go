@@ -32,7 +32,7 @@ templates:
 		t.Fatalf("write template: %v", err)
 	}
 
-	r, err := New(bridgeDir)
+	r, err := New(bridgeDir, nil)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

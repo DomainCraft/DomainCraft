@@ -12,6 +12,7 @@ import (
 
 	"github.com/DomainCraft/DomainCraft/internal/ir"
 	"github.com/DomainCraft/DomainCraft/internal/specmeta"
+	"github.com/DomainCraft/DomainCraft/pkg/logger"
 	"github.com/DomainCraft/DomainCraft/pkg/textutil"
 
 	"github.com/Masterminds/sprig/v3"
@@ -22,9 +23,10 @@ import (
 type Renderer struct {
 	bridgeDir string
 	config    BridgeConfig
+	log       *logger.Logger
 }
 
-func New(bridgePath string) (*Renderer, error) {
+func New(bridgePath string, log *logger.Logger) (*Renderer, error) {
 	bridgeDir, configPath := resolveBridgePath(bridgePath)
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -38,7 +40,7 @@ func New(bridgePath string) (*Renderer, error) {
 	if config.OutputDir == "" {
 		config.OutputDir = "generated"
 	}
-	return &Renderer{bridgeDir: bridgeDir, config: config}, nil
+	return &Renderer{bridgeDir: bridgeDir, config: config, log: log}, nil
 }
 
 func (r *Renderer) buildFuncMap() (template.FuncMap, error) {
@@ -377,6 +379,13 @@ func (r *Renderer) shouldRenderContext(spec TemplateSpec, context RenderContext)
 	}
 }
 
+// warn logs a warning if a logger is configured.
+func (r *Renderer) warn(format string, args ...interface{}) {
+	if r.log != nil {
+		r.log.Warn(format, args...)
+	}
+}
+
 // containsOwnerToken checks if any role in the slice starts with "@" (ownership token).
 func containsOwnerToken(roles []string) bool {
 	for _, r := range roles {
@@ -396,7 +405,11 @@ func (r *Renderer) resolvePackages() map[string]string {
 	result := make(map[string]string, len(r.config.RegistryPackages))
 	for key, packageID := range r.config.RegistryPackages {
 		version, err := resolveRegistryVersion(r.config.RegistryURL, packageID)
-		if err == nil && version != "" {
+		if err != nil {
+			r.warn("failed to resolve package %s: %v", packageID, err)
+			continue
+		}
+		if version != "" {
 			result[key] = version
 		}
 	}

@@ -76,8 +76,8 @@ entities:
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("validate command failed: %v\noutput: %s", err, output.String())
 	}
-	if !strings.Contains(output.String(), "Validation successful") {
-		t.Fatalf("unexpected output: %s", output.String())
+	if !strings.Contains(output.String(), "Schema valid") {
+		t.Fatalf("expected 'Schema valid' in output, got: %s", output.String())
 	}
 }
 

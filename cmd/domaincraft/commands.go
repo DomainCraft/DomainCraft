@@ -13,6 +13,7 @@ import (
 	"github.com/DomainCraft/DomainCraft/internal/parser"
 	"github.com/DomainCraft/DomainCraft/internal/renderer"
 	"github.com/DomainCraft/DomainCraft/internal/validator"
+	"github.com/DomainCraft/DomainCraft/pkg/logger"
 
 	"github.com/spf13/cobra"
 )
@@ -199,10 +200,14 @@ func newValidateCmd() *cobra.Command {
 		Use:   "validate",
 		Short: "Validate domain.yaml",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if _, err := loadAndValidate(cmd.OutOrStdout()); err != nil {
+			log := logger.New()
+			log.SetWriter(cmd.OutOrStdout())
+			log.Info("Validating %s", domainFile)
+			schema, err := loadAndValidate(cmd.OutOrStdout())
+			if err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "Validation successful")
+			log.Success("Schema valid (%d entities)", len(schema.Entities))
 			return nil
 		},
 	}
@@ -216,10 +221,15 @@ func newGenerateCmd() *cobra.Command {
 		Short: "Generate code from domain.yaml",
 		Long:  "Parse domain.yaml, build IR, and render code via the selected bridge.\nIf --bridge is omitted, an interactive selection menu is shown.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			log := logger.New()
+			log.SetWriter(cmd.OutOrStdout())
+
+			log.Info("Parsing %s", domainFile)
 			schema, err := loadAndValidate(cmd.OutOrStdout())
 			if err != nil {
 				return err
 			}
+			log.Success("Schema valid (%d entities)", len(schema.Entities))
 
 			resolvedPath, _, err := resolveBridgeInteractive()
 			if err != nil {
@@ -227,12 +237,14 @@ func newGenerateCmd() *cobra.Command {
 			}
 			bridgePath = resolvedPath
 
+			log.Info("Building IR")
 			irProject, err := ir.NewBuilder().Build(schema)
 			if err != nil {
 				return err
 			}
 
-			rendererInstance, err := renderer.New(bridgePath)
+			log.Info("Rendering via %s", bridgePath)
+			rendererInstance, err := renderer.New(bridgePath, log)
 			if err != nil {
 				return err
 			}
@@ -242,9 +254,9 @@ func newGenerateCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Generated %d file(s) into %s\n", len(writtenFiles), outputDir)
+			log.Success("Generated %d file(s) into %s", len(writtenFiles), outputDir)
 			for _, filePath := range writtenFiles {
-				fmt.Fprintf(cmd.OutOrStdout(), "- %s\n", filePath)
+				fmt.Fprintf(cmd.OutOrStdout(), "  - %s\n", filePath)
 			}
 			return nil
 		},
