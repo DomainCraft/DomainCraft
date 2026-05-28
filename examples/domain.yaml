@@ -69,6 +69,9 @@ entities:
       update: ["@Owner", Admin]
       delete: [Admin]
 
+    seed:
+      - { id: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", email: "admin@example.com", password: "hashed_password", firstName: "Admin", lastName: "User", role: "Admin", isActive: true }
+
   Product:
     features: [audit, soft_delete, optimistic_lock]
     fields:
@@ -102,7 +105,7 @@ entities:
       delete: [Admin]
 
     seed:
-      - { id: "550e8400-e29b-41d4-a716-446655440000", title: "Sample Product", price: "9999", stock: 100, status: "DRAFT" }
+      - { id: "550e8400-e29b-41d4-a716-446655440000", title: "Sample Product", price: "9999", stock: 100, status: "DRAFT", supplierId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11" }
 
   Category:
     features: [audit]
