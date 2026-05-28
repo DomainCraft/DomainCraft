@@ -43,6 +43,23 @@ func New(bridgePath string, log *logger.Logger) (*Renderer, error) {
 	return &Renderer{bridgeDir: bridgeDir, config: config, log: log}, nil
 }
 
+// delimiters returns the configured template delimiters, defaulting to ["{{", "}}"].
+func (r *Renderer) delimiters() (string, string) {
+	if len(r.config.Delimiters) >= 2 {
+		return r.config.Delimiters[0], r.config.Delimiters[1]
+	}
+	return "{{", "}}"
+}
+
+// applyDelimiters sets custom delimiters on a template if configured.
+func (r *Renderer) applyDelimiters(t *template.Template) *template.Template {
+	left, right := r.delimiters()
+	if left != "{{" || right != "}}" {
+		return t.Delims(left, right)
+	}
+	return t
+}
+
 func (r *Renderer) buildFuncMap() (template.FuncMap, error) {
 	funcMap := template.FuncMap{}
 	for key, value := range sprig.FuncMap() {
@@ -55,6 +72,9 @@ func (r *Renderer) buildFuncMap() (template.FuncMap, error) {
 	funcMap["camelcase"] = textutil.CamelCase
 	funcMap["lowercase"] = strings.ToLower
 	funcMap["uppercase"] = strings.ToUpper
+	funcMap["humanize"] = func(name string) string {
+		return strings.Join(textutil.SplitIdentifier(name), " ")
+	}
 	funcMap["jsonValue"] = jsonValue
 funcMap["fkName"] = func(name string) string {
 		// Append "Id" suffix if not already present.
@@ -120,6 +140,7 @@ func (r *Renderer) getBridgeSpecificFuncs() (map[string]interface{}, error) {
 			ArrayFormat    string            `yaml:"array_format"`
 			EnumNullable   bool              `yaml:"enum_nullable"`
 			NullableFormat string            `yaml:"nullable_format"`
+			InputTypes     map[string]string `yaml:"input_types"`
 		}
 		if err := yaml.Unmarshal(data, &mapping); err != nil {
 			return nil, fmt.Errorf("parse type_mappings.yaml: %w", err)
@@ -209,6 +230,21 @@ func (r *Renderer) getBridgeSpecificFuncs() (map[string]interface{}, error) {
 			}
 			return false
 		}
+
+		// inputType maps IR database types to UI input components (e.g. "string" -> "Input", "datetime" -> "DatePicker").
+		// Bridges that generate UI code define input_types in their type_mappings.yaml.
+		if len(mapping.InputTypes) > 0 {
+			bridgeFuncs["inputType"] = func(dbType string) string {
+				inner := specmeta.ParseArrayInner(dbType)
+				if mapped, ok := mapping.InputTypes[inner]; ok {
+					return mapped
+				}
+				if mapped, ok := mapping.InputTypes[dbType]; ok {
+					return mapped
+				}
+				return "Input"
+			}
+		}
 	}
 	return bridgeFuncs, nil
 }
@@ -238,7 +274,7 @@ func (r *Renderer) Render(project *ir.IRProject, outputDir string) ([]string, er
 		if err != nil {
 			return nil, fmt.Errorf("read helpers %s: %w", r.config.Helpers, err)
 		}
-		helpersTemplate, err = template.New("helpers").Funcs(funcMap).Parse(string(helperBytes))
+		helpersTemplate, err = r.applyDelimiters(template.New("helpers").Funcs(funcMap)).Parse(string(helperBytes))
 		if err != nil {
 			return nil, fmt.Errorf("parse helpers %s: %w", r.config.Helpers, err)
 		}
@@ -265,9 +301,9 @@ func (r *Renderer) Render(project *ir.IRProject, outputDir string) ([]string, er
 			if err != nil {
 				return nil, fmt.Errorf("clone helpers for %s: %w", spec.Source, err)
 			}
-			parsedTemplate, err = parsedTemplate.New(tplName).Parse(string(tplBytes))
+			parsedTemplate, err = r.applyDelimiters(parsedTemplate.New(tplName)).Parse(string(tplBytes))
 		} else {
-			parsedTemplate, err = template.New(tplName).Funcs(funcMap).Parse(string(tplBytes))
+			parsedTemplate, err = r.applyDelimiters(template.New(tplName).Funcs(funcMap)).Parse(string(tplBytes))
 		}
 		if err != nil {
 			return nil, fmt.Errorf("parse template %s: %w", spec.Source, err)
@@ -339,8 +375,16 @@ func (r *Renderer) shouldRenderContext(spec TemplateSpec, context RenderContext)
 	switch spec.When {
 	case "hasSeed":
 		// Only render seed templates if there's actual seed data
-		if context.Entity != nil && len(context.Entity.Seed) > 0 {
-			return true
+		if context.Entity != nil {
+			return len(context.Entity.Seed) > 0
+		}
+		// Project-level: check if any entity has seed data
+		if context.Project != nil {
+			for _, e := range context.Project.Entities {
+				if len(e.Seed) > 0 {
+					return true
+				}
+			}
 		}
 		return false
 	case "hasEnums":

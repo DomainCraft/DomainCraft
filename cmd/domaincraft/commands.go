@@ -23,6 +23,7 @@ var (
 	bridgePath     string
 	outputDir      string
 	nonInteractive bool
+	adminBridge    string // --admin [bridge-id]; empty = not requested
 )
 
 func Execute() {
@@ -216,10 +217,10 @@ func newValidateCmd() *cobra.Command {
 // --- generate ---
 
 func newGenerateCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "generate",
 		Short: "Generate code from domain.yaml",
-		Long:  "Parse domain.yaml, build IR, and render code via the selected bridge.\nIf --bridge is omitted, an interactive selection menu is shown.",
+		Long:  "Parse domain.yaml, build IR, and render code via the selected bridge.\nIf --bridge is omitted, an interactive selection menu is shown.\nUse --admin to also generate an admin panel (optionally specify a bridge ID).",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			log := logger.New()
 			log.SetWriter(cmd.OutOrStdout())
@@ -255,12 +256,28 @@ func newGenerateCmd() *cobra.Command {
 			}
 
 			log.Success("Generated %d file(s) into %s", len(writtenFiles), outputDir)
-			for _, filePath := range writtenFiles {
-				fmt.Fprintf(cmd.OutOrStdout(), "  - %s\n", filePath)
+
+			// --- Admin panel generation ---
+			if adminBridge == "" && !cmd.Flags().Changed("admin") && interactive.IsTerminal() {
+				generate, _ := interactive.PromptGenerateAdmin()
+				if generate {
+					adminBridge = "admin-refine"
+				}
 			}
+			if adminBridge != "" {
+				if err := generateAdminPanel(irProject, log); err != nil {
+					return err
+				}
+			}
+
 			return nil
 		},
 	}
+
+	// --admin [bridge-id] — optional value, defaults to "admin-refine" when flag is present without value.
+	cmd.Flags().StringVar(&adminBridge, "admin", "", "generate admin panel (optionally specify bridge ID, default: admin-refine)")
+
+	return cmd
 }
 
 // --- bridges ---
@@ -331,18 +348,54 @@ func resolveBridgeInteractive() (string, string, error) {
 	return resolved, entry.Name, nil
 }
 
+func generateAdminPanel(irProject *ir.IRProject, log *logger.Logger) error {
+	registry := bridge.Default()
+	resolver := bridge.NewResolver(registry)
+
+	adminID := adminBridge
+	if adminID == "" {
+		adminID = "admin-refine"
+	}
+
+	adminPath, err := resolver.Resolve(adminID)
+	if err != nil {
+		return fmt.Errorf("resolve admin bridge %q: %w", adminID, err)
+	}
+
+	log.Info("Rendering admin panel via %s", adminID)
+	adminRenderer, err := renderer.New(adminPath, log)
+	if err != nil {
+		return err
+	}
+
+	adminFiles, err := adminRenderer.Render(irProject, outputDir)
+	if err != nil {
+		return err
+	}
+
+	log.Success("Generated %d admin file(s)", len(adminFiles))
+	return nil
+}
+
 func loadAndValidate(out io.Writer) (*parser.ParsedSchema, error) {
 	schema, err := loadSchema(domainFile)
 	if err != nil {
 		return nil, err
 	}
 
-	validationErrors := validator.New(schema).Validate()
-	if len(validationErrors) > 0 {
-		for _, validationError := range validationErrors {
-			fmt.Fprintln(out, validationError.Error())
+	allErrors := validator.New(schema).Validate()
+	var hardErrors []validator.ValidationError
+	for _, e := range allErrors {
+		if e.Warning {
+			fmt.Fprintf(out, "⚠ %s\n", e.Error())
+		} else {
+			hardErrors = append(hardErrors, e)
+			fmt.Fprintln(out, e.Error())
 		}
-		return nil, fmt.Errorf("validation failed with %d error(s)", len(validationErrors))
+	}
+
+	if len(hardErrors) > 0 {
+		return nil, fmt.Errorf("validation failed with %d error(s)", len(hardErrors))
 	}
 
 	return schema, nil

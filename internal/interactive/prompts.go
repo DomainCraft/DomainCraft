@@ -147,3 +147,20 @@ func PromptAPIStyle() (string, error) {
 	}
 	return style, nil
 }
+
+// PromptGenerateAdmin asks whether to generate an admin panel alongside the backend.
+func PromptGenerateAdmin() (bool, error) {
+	var generate bool
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Generate admin panel?").
+				Description("Create a Refine.dev admin panel (React + Ant Design) for managing your data").
+				Value(&generate),
+		),
+	)
+	if err := form.Run(); err != nil {
+		return false, err
+	}
+	return generate, nil
+}

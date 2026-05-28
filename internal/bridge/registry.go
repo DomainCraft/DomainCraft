@@ -19,6 +19,13 @@ var DefaultRegistry = []RegistryEntry{
 		Language:    "C#",
 		GitHub:      "DomainCraft/domaincraft-bridge-csharp",
 	},
+	{
+		ID:          "admin-refine",
+		Name:        "Admin Panel (Refine)",
+		Description: "React admin panel with Refine.dev + Ant Design + Vite",
+		Language:    "TypeScript",
+		GitHub:      "DomainCraft/domaincraft-bridge-admin",
+	},
 }
 
 // Registry provides lookup methods over a set of bridge entries.

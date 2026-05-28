@@ -206,7 +206,7 @@ func (p *Parser) addFeatureFields(entity *ParsedEntity) error {
 		if !entity.Features[def.Feature] {
 			continue
 		}
-		entity.Fields[fieldName] = newFeatureField(def)
+		entity.Fields[fieldName] = newFeatureField(fieldName, def)
 		if def.IsOptional {
 			entity.Fields[fieldName].IsOptional = true
 		}
@@ -216,9 +216,9 @@ func (p *Parser) addFeatureFields(entity *ParsedEntity) error {
 }
 
 // newFeatureField creates a ParsedField for an auto-generated feature field.
-func newFeatureField(def specmeta.FeatureFieldDef) *ParsedField {
+func newFeatureField(name string, def specmeta.FeatureFieldDef) *ParsedField {
 	fd := &lexer.FieldDefinition{
-		Name:          "",
+		Name:          name,
 		Type:          def.Type,
 		IsRequired:    true,
 		Validations:   make(map[string]string),

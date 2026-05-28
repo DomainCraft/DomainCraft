@@ -11,6 +11,7 @@ type BridgeConfig struct {
 	RegistryURL      string            `yaml:"registry_url"`       // URL template for package registry ({id} = lowercase package ID)
 	RegistryPackages map[string]string  `yaml:"registry_packages"`  // logical key -> registry package ID (used with registry_url)
 	Templates        []TemplateSpec    `yaml:"templates"`
+	Delimiters       []string          `yaml:"delimiters"`         // Optional custom delimiters [left, right], default ["{{", "}}"]
 }
 
 // TemplateSpec describes one template rendering rule.
