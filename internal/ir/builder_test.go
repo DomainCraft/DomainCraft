@@ -43,15 +43,24 @@ func TestBuildCreatesRelations(t *testing.T) {
 		t.Fatalf("got %d entities, want 2", len(projectIR.Entities))
 	}
 
-	productIR := projectIR.Entities[0]
+	// After topological sort, Category (no deps) comes before Product (depends on Category).
+	categoryIR := projectIR.Entities[0]
+	if categoryIR.Name != "Category" {
+		t.Fatalf("expected Category first, got %s", categoryIR.Name)
+	}
+	if len(categoryIR.RelationsIn) != 1 {
+		t.Fatalf("expected one incoming relation on Category")
+	}
+
+	productIR := projectIR.Entities[1]
+	if productIR.Name != "Product" {
+		t.Fatalf("expected Product second, got %s", productIR.Name)
+	}
 	if len(productIR.RelationsOut) != 1 {
 		t.Fatalf("expected one outgoing relation")
 	}
 	if productIR.RelationsOut[0].NavigationName == "" {
 		t.Fatalf("navigation name must not be empty")
-	}
-	if len(projectIR.Entities[1].RelationsIn) != 1 {
-		t.Fatalf("expected one incoming relation on Category")
 	}
 }
 

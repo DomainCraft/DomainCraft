@@ -19,7 +19,7 @@ type Parser struct {
 type ParsedSchema struct {
 	Project     ProjectConfig
 	Database    string
-	Auth        string
+	Auth        *AuthConfig
 	APIStyle    string
 	Entities    map[string]*ParsedEntity
 	Enums       map[string][]string
@@ -72,10 +72,11 @@ func NewParser(raw *RawSchema) *Parser {
 
 // Parse performs full parsing with validation
 func (p *Parser) Parse() (*ParsedSchema, error) {
+	auth := p.raw.Auth
 	schema := &ParsedSchema{
 		Project:     p.raw.Project,
 		Database:    p.raw.Database,
-		Auth:        p.raw.Auth,
+		Auth:        &auth,
 		APIStyle:    p.raw.APIStyle,
 		Entities:    make(map[string]*ParsedEntity),
 		Enums:       p.raw.Enums,

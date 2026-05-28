@@ -114,8 +114,9 @@ func (v *Validator) validateProject() []ValidationError {
 	if v.schema.Database != "" && !slices.Contains(specmeta.Databases, v.schema.Database) {
 		errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("unknown database %q; allowed: %s", v.schema.Database, strings.Join(specmeta.Databases, ", "))})
 	}
-	if v.schema.Auth != "" && v.schema.Auth != "jwt" && v.schema.Auth != "none" {
-		errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("unknown auth %q; allowed: jwt, none", v.schema.Auth)})
+	// Auth validation
+	if v.schema.Auth != nil {
+		errs = append(errs, v.validateAuth()...)
 	}
 	if v.schema.APIStyle != "" && !slices.Contains(specmeta.APIStyles, v.schema.APIStyle) {
 		errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("unknown api_style %q; allowed: %s", v.schema.APIStyle, strings.Join(specmeta.APIStyles, ", "))})
@@ -141,6 +142,95 @@ func (v *Validator) validateProject() []ValidationError {
 	// CORS
 	if p.CORS != nil && p.CORS.Enabled && len(p.CORS.Origins) == 0 {
 		errs = append(errs, ValidationError{Entity: "<schema>", Message: "cors.enabled is true but no origins specified", Warning: true})
+	}
+
+	return errs
+}
+
+// --- auth ---
+
+func (v *Validator) validateAuth() []ValidationError {
+	var errs []ValidationError
+	auth := v.schema.Auth
+
+	if auth.Type != "" && !slices.Contains(specmeta.AuthTypes, auth.Type) {
+		errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("unknown auth.type %q; allowed: %s", auth.Type, strings.Join(specmeta.AuthTypes, ", "))})
+	}
+
+	if auth.Type == "none" {
+		return errs
+	}
+
+	// Entity validation
+	if auth.Entity != "" {
+		if _, ok := v.schema.Entities[auth.Entity]; !ok {
+			errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("auth.entity %q does not exist", auth.Entity)})
+		}
+	} else {
+		// Auto-detect: find entity with email + password
+		found := false
+		for _, name := range v.schema.EntityOrder {
+			entity := v.schema.Entities[name]
+			if entity == nil {
+				continue
+			}
+			hasEmail, hasPassword := false, false
+			for _, fieldName := range entity.FieldOrder {
+				switch strings.ToLower(fieldName) {
+				case "email":
+					hasEmail = true
+				case "password":
+					hasPassword = true
+				}
+			}
+			if hasEmail && hasPassword {
+				found = true
+				break
+			}
+		}
+		if !found {
+			errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("auth.type is %q but no entity has both 'email' and 'password' fields; specify auth.entity explicitly", auth.Type), Warning: true})
+		}
+	}
+
+	// Roles must be valid identifiers
+	for _, role := range auth.Roles {
+		if !validIdentifier.MatchString(role) {
+			errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("auth.roles: %q is not a valid identifier", role)})
+		}
+	}
+
+	// Validate that auth roles are used in at least one entity's permissions
+	if len(auth.Roles) > 0 {
+		roleSet := make(map[string]bool, len(auth.Roles))
+		for _, r := range auth.Roles {
+			roleSet[r] = true
+		}
+		for _, entityName := range v.schema.EntityOrder {
+			entity := v.schema.Entities[entityName]
+			if entity == nil || entity.Permissions == nil {
+				continue
+			}
+			for _, roles := range [][]string{
+				entity.Permissions.Read,
+				entity.Permissions.Create,
+				entity.Permissions.Update,
+				entity.Permissions.Delete,
+			} {
+				for _, r := range roles {
+					if r == "*" || r == "" || strings.HasPrefix(r, "@") {
+						continue
+					}
+					if !roleSet[r] {
+						errs = append(errs, ValidationError{
+							Entity:  entityName,
+							Message: fmt.Sprintf("permission role %q is not defined in auth.roles; add it to auth.roles or remove from permissions", r),
+							Warning: true,
+						})
+					}
+				}
+			}
+		}
 	}
 
 	return errs

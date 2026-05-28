@@ -16,7 +16,8 @@ project:
     mode: column
 
 database: postgresql
-auth: jwt
+auth:
+  type: jwt
 api_style: rest
 
 enums:
@@ -148,8 +149,8 @@ entities:
 	if schema.Database != "postgresql" {
 		t.Errorf("database = %v, want postgresql", schema.Database)
 	}
-	if schema.Auth != "jwt" {
-		t.Errorf("auth = %v, want jwt", schema.Auth)
+	if schema.Auth.Type != "jwt" {
+		t.Errorf("auth.type = %v, want jwt", schema.Auth.Type)
 	}
 
 	// Verify enums

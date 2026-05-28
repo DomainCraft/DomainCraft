@@ -6,7 +6,7 @@ import "gopkg.in/yaml.v3"
 type RawSchema struct {
 	Project  ProjectConfig        `yaml:"project"`
 	Database string               `yaml:"database"`
-	Auth     string               `yaml:"auth"`
+	Auth     AuthConfig           `yaml:"auth"`
 	APIStyle string               `yaml:"api_style"`
 	Entities map[string]RawEntity `yaml:"entities"`
 	Enums    map[string][]string  `yaml:"enums"`
@@ -22,6 +22,30 @@ type ProjectConfig struct {
 	Cache        *CacheConfig        `yaml:"cache"`
 	CORS         *CORSConfig         `yaml:"cors"`
 }
+
+// AuthConfig describes authentication configuration.
+type AuthConfig struct {
+	Type      string        `yaml:"type"`      // jwt, none
+	Entity    string        `yaml:"entity"`    // optional, auto-detect if empty
+	Roles     []string      `yaml:"roles"`     // optional, for enum generation
+	Endpoints AuthEndpoints `yaml:"endpoints"` // optional, defaults to all true
+}
+
+// AuthEndpoints controls which auth endpoints are generated.
+type AuthEndpoints struct {
+	Login    *bool `yaml:"login"`    // default: true
+	Register *bool `yaml:"register"` // default: true
+	Me       *bool `yaml:"me"`       // default: true
+}
+
+// HasLogin returns true if login endpoint is enabled (default: true).
+func (e AuthEndpoints) HasLogin() bool { return e.Login == nil || *e.Login }
+
+// HasRegister returns true if register endpoint is enabled (default: true).
+func (e AuthEndpoints) HasRegister() bool { return e.Register == nil || *e.Register }
+
+// HasMe returns true if me endpoint is enabled (default: true).
+func (e AuthEndpoints) HasMe() bool { return e.Me == nil || *e.Me }
 
 // CacheConfig represents cache configuration (agnostic — no language/platform specifics).
 type CacheConfig struct {
@@ -71,8 +95,8 @@ func ParseRawSchema(data []byte) (*RawSchema, error) {
 	if schema.Database == "" {
 		schema.Database = "postgresql"
 	}
-	if schema.Auth == "" {
-		schema.Auth = "none"
+	if schema.Auth.Type == "" {
+		schema.Auth.Type = "none"
 	}
 	if schema.APIStyle == "" {
 		schema.APIStyle = "rest"

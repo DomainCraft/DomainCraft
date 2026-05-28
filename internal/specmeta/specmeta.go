@@ -26,6 +26,11 @@ var APIStyles = []string{
 	"grpc",
 }
 
+var AuthTypes = []string{
+	"jwt",
+	"none",
+}
+
 var Features = []string{
 	"audit",
 	"audit_log",

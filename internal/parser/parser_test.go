@@ -9,7 +9,8 @@ func TestParseRawSchema(t *testing.T) {
 project:
   name: Test Project
 database: postgresql
-auth: jwt
+auth:
+  type: jwt
 api_style: rest
 entities:
   User:
@@ -29,8 +30,8 @@ entities:
 	if schema.Database != "postgresql" {
 		t.Errorf("got database %v, want postgresql", schema.Database)
 	}
-	if schema.Auth != "jwt" {
-		t.Errorf("got auth %v, want jwt", schema.Auth)
+	if schema.Auth.Type != "jwt" {
+		t.Errorf("got auth.type %v, want jwt", schema.Auth.Type)
 	}
 }
 
@@ -49,8 +50,8 @@ entities: {}
 	if schema.Database != "postgresql" {
 		t.Errorf("got default database %v, want postgresql", schema.Database)
 	}
-	if schema.Auth != "none" {
-		t.Errorf("got default auth %v, want none", schema.Auth)
+	if schema.Auth.Type != "none" {
+		t.Errorf("got default auth.type %v, want none", schema.Auth.Type)
 	}
 	if schema.APIStyle != "rest" {
 		t.Errorf("got default api_style %v, want rest", schema.APIStyle)

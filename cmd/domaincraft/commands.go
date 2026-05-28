@@ -162,12 +162,25 @@ func runNonInteractiveNew(cmd *cobra.Command) error {
 }
 
 func scaffoldDomainYAML(path, name, version, database, auth, apiStyle string) error {
+	var authBlock string
+	if auth == "none" {
+		authBlock = "auth:\n  type: none"
+	} else {
+		authBlock = fmt.Sprintf(`auth:
+  type: %s
+  roles: [Admin, User]
+  endpoints:
+    login: true
+    register: true
+    me: true`, auth)
+	}
+
 	content := fmt.Sprintf(`project:
   name: %s
   version: %s
 
 database: %s
-auth: %s
+%s
 api_style: %s
 
 entities:
@@ -177,7 +190,8 @@ entities:
       id: uuid [primary]
       email: string [required, unique, email]
       name: string [required]
-`, name, version, database, auth, apiStyle)
+      password: string [required, hidden]
+`, name, version, database, authBlock, apiStyle)
 
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
@@ -320,11 +334,15 @@ func newBridgesCmd() *cobra.Command {
 
 // --- helpers ---
 
+// newResolver creates a shared bridge resolver.
+func newResolver() *bridge.Resolver {
+	return bridge.NewResolver(bridge.Default())
+}
+
 // resolveBridgeInteractive resolves the bridge from the --bridge flag, or
 // prompts the user interactively. Returns (path, displayName, error).
 func resolveBridgeInteractive() (string, string, error) {
-	registry := bridge.Default()
-	resolver := bridge.NewResolver(registry)
+	resolver := newResolver()
 
 	if bridgePath != "" {
 		resolved, err := resolver.Resolve(bridgePath)
@@ -335,7 +353,7 @@ func resolveBridgeInteractive() (string, string, error) {
 		return "", "", fmt.Errorf("--bridge is required in non-interactive mode")
 	}
 
-	entry, err := interactive.SelectBridge(registry)
+	entry, err := interactive.SelectBridge(bridge.Default())
 	if err != nil {
 		return "", "", err
 	}
@@ -349,8 +367,7 @@ func resolveBridgeInteractive() (string, string, error) {
 }
 
 func generateAdminPanel(irProject *ir.IRProject, log *logger.Logger) error {
-	registry := bridge.Default()
-	resolver := bridge.NewResolver(registry)
+	resolver := newResolver()
 
 	adminID := adminBridge
 	if adminID == "" {

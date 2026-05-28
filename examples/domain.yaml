@@ -7,7 +7,14 @@ project:
     mode: column
 
 database: postgresql
-auth: jwt
+auth:
+  type: jwt
+  entity: User
+  roles: [Admin, Editor, Customer, Vendor, User]
+  endpoints:
+    login: true
+    register: true
+    me: true
 api_style: rest
 
 enums:

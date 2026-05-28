@@ -6,13 +6,33 @@ import "github.com/DomainCraft/DomainCraft/internal/specmeta"
 type IRProject struct {
 	Name     string
 	Database string
-	Auth     string
+	Auth     *IRAuthConfig
 	APIStyle string
 	Platform string // target platform version (e.g. "net9.0"), passed through to templates
 	Enums    map[string][]string
 	Entities []IREntity
 	Cache    *IRCacheConfig
 	CORS     *IRCORSConfig
+}
+
+// IRAuthConfig represents authentication configuration in IR.
+type IRAuthConfig struct {
+	Type      string
+	Entity    string // resolved entity name
+	Roles     []string
+	Endpoints IRAuthEndpoints
+}
+
+// IRAuthEndpoints controls which auth endpoints are generated.
+type IRAuthEndpoints struct {
+	HasLogin    bool
+	HasRegister bool
+	HasMe       bool
+}
+
+// HasAuth returns true if authentication is enabled.
+func (p *IRProject) HasAuth() bool {
+	return p.Auth != nil && p.Auth.Type != "" && p.Auth.Type != "none"
 }
 
 // IRCacheConfig represents cache configuration in IR.

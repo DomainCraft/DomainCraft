@@ -25,7 +25,7 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 	irProject := &IRProject{
 		Name:     schema.Project.Name,
 		Database: schema.Database,
-		Auth:     schema.Auth,
+		Auth:     convertAuth(schema.Auth, schema),
 		APIStyle: schema.APIStyle,
 		Platform: schema.Project.Platform,
 		Enums:    schema.Enums,
@@ -192,6 +192,75 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 		}
 	}
 
+	// Topological sort of entities by FK dependencies.
+	// Entities with no outgoing FK dependencies are placed first so that
+	// the seeder inserts rows in the correct order (parents before children).
+	{
+		// Build set of dependencies per entity: deps[A] = {B, C, ...} means A depends on B, C.
+		deps := make(map[string]map[string]bool, len(irProject.Entities))
+		for _, entity := range irProject.Entities {
+			depSet := make(map[string]bool)
+			for _, rel := range entity.RelationsOut {
+				if !rel.IsMany && rel.TargetEntity != nil && rel.TargetEntity.Name != entity.Name {
+					depSet[rel.TargetEntity.Name] = true
+				}
+			}
+			deps[entity.Name] = depSet
+		}
+
+		// In-degree = number of dependencies (entities that must come before this one).
+		inDegree := make(map[string]int, len(irProject.Entities))
+		for _, entity := range irProject.Entities {
+			inDegree[entity.Name] = len(deps[entity.Name])
+		}
+
+		// Kahn's algorithm.
+		queue := make([]string, 0)
+		for _, entity := range irProject.Entities {
+			if inDegree[entity.Name] == 0 {
+				queue = append(queue, entity.Name)
+			}
+		}
+
+		sorted := make([]IREntity, 0, len(irProject.Entities))
+		entityByName := make(map[string]IREntity, len(irProject.Entities))
+		for _, e := range irProject.Entities {
+			entityByName[e.Name] = e
+		}
+
+		for len(queue) > 0 {
+			name := queue[0]
+			queue = queue[1:]
+			sorted = append(sorted, entityByName[name])
+
+			// For every entity that depends on the one we just processed,
+			// decrement its in-degree. When it reaches 0, enqueue it.
+			for _, entity := range irProject.Entities {
+				if deps[entity.Name][name] {
+					inDegree[entity.Name]--
+					if inDegree[entity.Name] == 0 {
+						queue = append(queue, entity.Name)
+					}
+				}
+			}
+		}
+
+		// If topological sort didn't include all entities (cycle), append the rest in original order.
+		if len(sorted) < len(irProject.Entities) {
+			sortedSet := make(map[string]bool, len(sorted))
+			for _, e := range sorted {
+				sortedSet[e.Name] = true
+			}
+			for _, e := range irProject.Entities {
+				if !sortedSet[e.Name] {
+					sorted = append(sorted, e)
+				}
+			}
+		}
+
+		irProject.Entities = sorted
+	}
+
 	return irProject, nil
 }
 
@@ -288,6 +357,56 @@ func navigationName(field *parser.ParsedField) string {
 		name = field.RelationTarget
 	}
 	return textutil.PascalCase(name)
+}
+
+func convertAuth(source *parser.AuthConfig, schema *parser.ParsedSchema) *IRAuthConfig {
+	if source == nil || source.Type == "" || source.Type == "none" {
+		return nil
+	}
+
+	entity := source.Entity
+	if entity == "" {
+		entity = autoDetectAuthEntity(schema)
+	}
+
+	login := source.Endpoints.HasLogin()
+	register := source.Endpoints.HasRegister()
+	me := source.Endpoints.HasMe()
+
+	return &IRAuthConfig{
+		Type:   source.Type,
+		Entity: entity,
+		Roles:  append([]string(nil), source.Roles...),
+		Endpoints: IRAuthEndpoints{
+			HasLogin:    login,
+			HasRegister: register,
+			HasMe:       me,
+		},
+	}
+}
+
+// autoDetectAuthEntity finds the first entity with both "email" and "password" fields.
+func autoDetectAuthEntity(schema *parser.ParsedSchema) string {
+	for _, name := range schema.EntityOrder {
+		entity := schema.Entities[name]
+		if entity == nil {
+			continue
+		}
+		hasEmail := false
+		hasPassword := false
+		for _, fieldName := range entity.FieldOrder {
+			switch strings.ToLower(fieldName) {
+			case "email":
+				hasEmail = true
+			case "password":
+				hasPassword = true
+			}
+		}
+		if hasEmail && hasPassword {
+			return name
+		}
+	}
+	return ""
 }
 
 func normalizeDeleteBehavior(value string) string {

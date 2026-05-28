@@ -418,6 +418,8 @@ func (r *Renderer) shouldRenderContext(spec TemplateSpec, context RenderContext)
 			}
 		}
 		return false
+	case "hasAuth":
+		return context.Project != nil && context.Project.HasAuth()
 	default:
 		return true
 	}
