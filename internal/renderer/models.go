@@ -69,22 +69,22 @@ func (c RenderContext) NamePlural() string {
 
 // HasAudit reports whether the current entity has audit fields enabled.
 func (c RenderContext) HasAudit() bool {
-	return c.Entity != nil && c.Entity.HasAudit
+	return c.Entity != nil && c.Entity.HasAudit()
 }
 
 // HasAuditLog reports whether the current entity has audit-log fields enabled.
 func (c RenderContext) HasAuditLog() bool {
-	return c.Entity != nil && c.Entity.HasAuditLog
+	return c.Entity != nil && c.Entity.HasAuditLog()
 }
 
 // HasSoftDelete reports whether the current entity has soft delete enabled.
 func (c RenderContext) HasSoftDelete() bool {
-	return c.Entity != nil && c.Entity.HasSoftDelete
+	return c.Entity != nil && c.Entity.HasSoftDelete()
 }
 
 // HasOptimisticLock reports whether the current entity has optimistic locking enabled.
 func (c RenderContext) HasOptimisticLock() bool {
-	return c.Entity != nil && c.Entity.HasOptimisticLock
+	return c.Entity != nil && c.Entity.HasOptimisticLock()
 }
 
 // Permissions exposes the current entity permissions to templates.

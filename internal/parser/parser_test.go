@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -314,5 +315,163 @@ entities:
 
 	if len(doc.Permissions.Read) != 2 {
 		t.Errorf("got %d read permissions, want 2", len(doc.Permissions.Read))
+	}
+}
+
+func TestParsePrimaryImpliesRequired(t *testing.T) {
+	// Parser normalizes primary→required (lexer no longer does this).
+	yamlData := []byte(`
+project:
+  name: Test
+entities:
+  User:
+    fields:
+      id: uuid [primary]
+`)
+	parsed, err := ParseYAML(yamlData)
+	if err != nil {
+		t.Fatalf("ParseYAML() error = %v", err)
+	}
+	user := parsed.Entities["User"]
+	id := user.Fields["id"]
+	if !id.IsPrimary {
+		t.Error("expected IsPrimary=true")
+	}
+	if !id.IsRequired {
+		t.Error("parser should normalize primary→required")
+	}
+}
+
+func TestParseOptionalImpliesNotRequired(t *testing.T) {
+	yamlData := []byte(`
+project:
+  name: Test
+entities:
+  User:
+    fields:
+      id: uuid [primary]
+      bio: string [optional]
+`)
+	parsed, err := ParseYAML(yamlData)
+	if err != nil {
+		t.Fatalf("ParseYAML() error = %v", err)
+	}
+	user := parsed.Entities["User"]
+	bio := user.Fields["bio"]
+	if !bio.IsOptional {
+		t.Error("expected IsOptional=true")
+	}
+	if bio.IsRequired {
+		t.Error("parser should normalize optional→not required")
+	}
+}
+
+func TestParseRelationTypeInference(t *testing.T) {
+	yamlData := []byte(`
+project:
+  name: Test
+entities:
+  Order:
+    fields:
+      id: uuid [primary]
+      userId: relation(User)
+      tagId: relation(Tag) [unique]
+      categoryIds: relation(Category) [many]
+  User:
+    fields:
+      id: uuid [primary]
+  Tag:
+    fields:
+      id: uuid [primary]
+  Category:
+    fields:
+      id: uuid [primary]
+`)
+	parsed, err := ParseYAML(yamlData)
+	if err != nil {
+		t.Fatalf("ParseYAML() error = %v", err)
+	}
+	order := parsed.Entities["Order"]
+
+	tests := []struct {
+		field    string
+		wantType string
+	}{
+		{"userId", "many-to-one"},
+		{"tagId", "one-to-one"},
+		{"categoryIds", "many-to-many"},
+	}
+	for _, tt := range tests {
+		f := order.Fields[tt.field]
+		if f.RelationType != tt.wantType {
+			t.Errorf("field %s: RelationType = %q, want %q", tt.field, f.RelationType, tt.wantType)
+		}
+	}
+}
+
+func TestParseDeployDefaults(t *testing.T) {
+	// Parser should set deploy defaults (port=8080, domain=localhost).
+	yamlData := []byte(`
+project:
+  name: Test
+entities:
+  User:
+    fields:
+      id: uuid [primary]
+`)
+	parsed, err := ParseRawSchema(yamlData)
+	if err != nil {
+		t.Fatalf("ParseRawSchema() error = %v", err)
+	}
+	if parsed.Project.Deploy == nil {
+		t.Fatal("Deploy config should not be nil (defaults should be set)")
+	}
+	if parsed.Project.Deploy.Port != 8080 {
+		t.Errorf("Deploy.Port = %d, want 8080", parsed.Project.Deploy.Port)
+	}
+	if parsed.Project.Deploy.Domain != "localhost" {
+		t.Errorf("Deploy.Domain = %q, want localhost", parsed.Project.Deploy.Domain)
+	}
+}
+
+func TestParseDeployExplicitValues(t *testing.T) {
+	yamlData := []byte(`
+project:
+  name: Test
+  deploy:
+    port: 3000
+    domain: api.example.com
+entities:
+  User:
+    fields:
+      id: uuid [primary]
+`)
+	parsed, err := ParseRawSchema(yamlData)
+	if err != nil {
+		t.Fatalf("ParseRawSchema() error = %v", err)
+	}
+	if parsed.Project.Deploy.Port != 3000 {
+		t.Errorf("Deploy.Port = %d, want 3000", parsed.Project.Deploy.Port)
+	}
+	if parsed.Project.Deploy.Domain != "api.example.com" {
+		t.Errorf("Deploy.Domain = %q, want api.example.com", parsed.Project.Deploy.Domain)
+	}
+}
+
+func TestParseUnknownEntityKey(t *testing.T) {
+	yamlData := []byte(`
+project:
+  name: Test
+entities:
+  User:
+    feilds:
+      id: uuid [primary]
+`)
+	_, err := ParseYAML(yamlData)
+	if err == nil {
+		t.Fatal("expected error for unknown entity key 'feilds'")
+	}
+	if !strings.Contains(err.Error(), "unknown entity key") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }

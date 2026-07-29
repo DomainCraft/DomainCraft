@@ -3,6 +3,7 @@ package ir
 import (
 	"testing"
 
+	"github.com/DomainCraft/DomainCraft/internal/lexer"
 	"github.com/DomainCraft/DomainCraft/internal/parser"
 	"github.com/DomainCraft/DomainCraft/internal/testutil"
 )
@@ -166,4 +167,202 @@ func TestBuildResolvesPrimitiveTypes(t *testing.T) {
 
 func mustParsedField(t *testing.T, name, input string) *parser.ParsedField {
 	return testutil.MustParsedField(t, name, input)
+}
+
+func TestNavigationNameStripsIdSuffix(t *testing.T) {
+	tests := []struct {
+		name     string
+		field    *parser.ParsedField
+		wantNav  string
+	}{
+		{
+			name:    "categoryId",
+			field:   &parser.ParsedField{FieldDefinition: &lexer.FieldDefinition{Name: "categoryId", Type: "relation", TargetEntity: "Category"}},
+			wantNav: "Category",
+		},
+		{
+			name:    "categoryID",
+			field:   &parser.ParsedField{FieldDefinition: &lexer.FieldDefinition{Name: "categoryID", Type: "relation", TargetEntity: "Category"}},
+			wantNav: "Category",
+		},
+		{
+			name:    "fluid does not strip id",
+			field:   &parser.ParsedField{FieldDefinition: &lexer.FieldDefinition{Name: "fluid", Type: "string"}},
+			wantNav: "Fluid",
+		},
+		{
+			name:    "squid does not strip id",
+			field:   &parser.ParsedField{FieldDefinition: &lexer.FieldDefinition{Name: "squid", Type: "string"}},
+			wantNav: "Squid",
+		},
+		{
+			name:    "avoid does not strip id",
+			field:   &parser.ParsedField{FieldDefinition: &lexer.FieldDefinition{Name: "avoid", Type: "string"}},
+			wantNav: "Avoid",
+		},
+		{
+			name:    "userId",
+			field:   &parser.ParsedField{FieldDefinition: &lexer.FieldDefinition{Name: "userId", Type: "relation", TargetEntity: "User"}},
+			wantNav: "User",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := navigationName(tt.field)
+			if got != tt.wantNav {
+				t.Errorf("navigationName() = %q, want %q", got, tt.wantNav)
+			}
+		})
+	}
+}
+
+func TestBuildCopiesDescription(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test", Description: "A test project"},
+		Database:    "postgresql",
+		EntityOrder: []string{"User"},
+		Entities: map[string]*parser.ParsedEntity{
+			"User": {
+				Name:       "User",
+				NamePlural: "Users",
+				FieldOrder: []string{"id"},
+				Fields: map[string]*parser.ParsedField{
+					"id": mustParsedField(t, "id", "uuid [primary]"),
+				},
+			},
+		},
+	}
+	schema.Entities["User"].Fields["id"].IsPrimary = true
+
+	projectIR, err := NewBuilder().Build(schema)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if projectIR.Description != "A test project" {
+		t.Errorf("Description = %q, want %q", projectIR.Description, "A test project")
+	}
+}
+
+func TestBuildCopiesFeaturesMap(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		Database:    "postgresql",
+		EntityOrder: []string{"User"},
+		Entities: map[string]*parser.ParsedEntity{
+			"User": {
+				Name:       "User",
+				NamePlural: "Users",
+				Features:   map[string]bool{"audit": true, "soft_delete": true},
+				FieldOrder: []string{"id"},
+				Fields: map[string]*parser.ParsedField{
+					"id": mustParsedField(t, "id", "uuid [primary]"),
+				},
+			},
+		},
+	}
+	schema.Entities["User"].Fields["id"].IsPrimary = true
+
+	projectIR, err := NewBuilder().Build(schema)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	user := projectIR.Entities[0]
+	if user.Features == nil {
+		t.Fatal("Features map is nil")
+	}
+	if !user.Features["audit"] {
+		t.Error("expected Features[audit] = true")
+	}
+	if !user.Features["soft_delete"] {
+		t.Error("expected Features[soft_delete] = true")
+	}
+	if user.Features["optimistic_lock"] {
+		t.Error("expected Features[optimistic_lock] = false")
+	}
+	if !user.HasFeature("audit") {
+		t.Error("HasFeature('audit') should be true")
+	}
+	if !user.HasFeature("soft_delete") {
+		t.Error("HasFeature('soft_delete') should be true")
+	}
+	if user.HasFeature("nonexistent") {
+		t.Error("HasFeature('nonexistent') should be false")
+	}
+}
+
+func TestBuildCircularDependency(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		Database:    "postgresql",
+		EntityOrder: []string{"A", "B"},
+		Entities: map[string]*parser.ParsedEntity{
+			"A": {
+				Name:       "A",
+				NamePlural: "As",
+				FieldOrder: []string{"id", "bRef"},
+				Fields: map[string]*parser.ParsedField{
+					"id":    mustParsedField(t, "id", "uuid [primary]"),
+					"bRef": mustParsedField(t, "bRef", "relation(B)"),
+				},
+			},
+			"B": {
+				Name:       "B",
+				NamePlural: "Bs",
+				FieldOrder: []string{"id", "aRef"},
+				Fields: map[string]*parser.ParsedField{
+					"id":    mustParsedField(t, "id", "uuid [primary]"),
+					"aRef": mustParsedField(t, "aRef", "relation(A)"),
+				},
+			},
+		},
+	}
+	schema.Entities["A"].Fields["bRef"].IsRelation = true
+	schema.Entities["A"].Fields["bRef"].RelationTarget = "B"
+	schema.Entities["B"].Fields["aRef"].IsRelation = true
+	schema.Entities["B"].Fields["aRef"].RelationTarget = "A"
+
+	projectIR, err := NewBuilder().Build(schema)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if len(projectIR.CircularDeps) == 0 {
+		t.Fatal("expected circular dependency info, got none")
+	}
+}
+
+func TestBuildCopiesDatabaseColumnName(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		Database:    "postgresql",
+		EntityOrder: []string{"User"},
+		Entities: map[string]*parser.ParsedEntity{
+			"User": {
+				Name:       "User",
+				NamePlural: "Users",
+				FieldOrder: []string{"id", "firstName"},
+				Fields: map[string]*parser.ParsedField{
+					"id":        mustParsedField(t, "id", "uuid [primary]"),
+					"firstName": mustParsedField(t, "firstName", "string"),
+				},
+			},
+		},
+	}
+	schema.Entities["User"].Fields["id"].IsPrimary = true
+	schema.Entities["User"].Fields["firstName"].DatabaseColumnName = "first_name"
+
+	projectIR, err := NewBuilder().Build(schema)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	user := projectIR.Entities[0]
+	for _, f := range user.Fields {
+		if f.Name == "firstName" {
+			if f.DatabaseColumnName != "first_name" {
+				t.Errorf("DatabaseColumnName = %q, want %q", f.DatabaseColumnName, "first_name")
+			}
+			return
+		}
+	}
+	t.Fatal("firstName field not found in IR")
 }

@@ -23,13 +23,14 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 	}
 
 	irProject := &IRProject{
-		Name:     schema.Project.Name,
-		Database: schema.Database,
-		Auth:     convertAuth(schema.Auth, schema),
-		APIStyle: schema.APIStyle,
-		Platform: schema.Project.Platform,
-		Enums:    schema.Enums,
-		Entities: make([]IREntity, 0, len(schema.Entities)),
+		Name:        schema.Project.Name,
+		Description: schema.Project.Description,
+		Database:    schema.Database,
+		Auth:        convertAuth(schema.Auth, schema),
+		APIStyle:    schema.APIStyle,
+		Platform:    schema.Project.Platform,
+		Enums:       copyEnumsSorted(schema.Enums),
+		Entities:    make([]IREntity, 0, len(schema.Entities)),
 	}
 
 	if schema.Project.Cache != nil {
@@ -47,20 +48,10 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 		}
 	}
 	if schema.Project.Deploy != nil {
-		port := schema.Project.Deploy.Port
-		if port == 0 {
-			port = 8080
-		}
-		domain := schema.Project.Deploy.Domain
-		if domain == "" {
-			domain = "localhost"
-		}
 		irProject.Deploy = &IRDeployConfig{
-			Domain: domain,
-			Port:   port,
+			Domain: schema.Project.Deploy.Domain,
+			Port:   schema.Project.Deploy.Port,
 		}
-	} else {
-		irProject.Deploy = &IRDeployConfig{Domain: "localhost", Port: 8080}
 	}
 
 	entityIndex := make(map[string]*IREntity, len(schema.Entities))
@@ -71,18 +62,15 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 		}
 
 		irEntity := IREntity{
-			Name:              sourceEntity.Name,
-			NamePlural:        sourceEntity.NamePlural,
-			HasAudit:          sourceEntity.Features["audit"],
-			HasAuditLog:       sourceEntity.Features["audit_log"],
-			HasSoftDelete:     sourceEntity.Features["soft_delete"],
-			HasOptimisticLock: sourceEntity.Features["optimistic_lock"],
-			Fields:            make([]IRField, 0, len(sourceEntity.FieldOrder)),
-			RelationsOut:      make([]IRRelation, 0),
-			RelationsIn:       make([]IRRelation, 0),
-			Indexes:           make([]IRIndex, 0, len(sourceEntity.Indexes)),
-			Seed:              sourceEntity.Seed,
-			Permissions:       convertPermissions(sourceEntity.Permissions),
+			Name:         sourceEntity.Name,
+			NamePlural:   sourceEntity.NamePlural,
+			Features:     copyFeatureMap(sourceEntity.Features),
+			Fields:       make([]IRField, 0, len(sourceEntity.FieldOrder)),
+			RelationsOut: make([]IRRelation, 0),
+			RelationsIn:  make([]IRRelation, 0),
+			Indexes:      make([]IRIndex, 0, len(sourceEntity.Indexes)),
+			Seed:         sourceEntity.Seed,
+			Permissions:  convertPermissions(sourceEntity.Permissions),
 		}
 
 		for _, fieldName := range sourceEntity.FieldOrder {
@@ -92,19 +80,20 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 			}
 
 			irEntity.Fields = append(irEntity.Fields, IRField{
-				Name:           field.Name,
-				DatabaseType:   resolveDatabaseType(field, schema),
-				NavigationName: navigationName(field),
-				IsPrimary:      field.IsPrimary,
-				IsNullable:     field.IsOptional,
-				IsUnique:       field.IsUnique,
-				IsHidden:       field.IsHidden,
-				IsRelation:     field.IsRelation,
-				IsMany:         field.IsMany,
-				RelationTarget: field.RelationTarget,
-				DefaultValue:   field.DefaultValue,
-				DefaultIsFunc:  field.DefaultIsFunc,
-				Validations:    convertValidations(field.Validations),
+				Name:               field.Name,
+				DatabaseType:       resolveDatabaseType(field, schema),
+				DatabaseColumnName: field.DatabaseColumnName,
+				NavigationName:     navigationName(field),
+				IsPrimary:          field.IsPrimary,
+				IsNullable:         field.IsOptional,
+				IsUnique:           field.IsUnique,
+				IsHidden:           field.IsHidden,
+				IsRelation:         field.IsRelation,
+				IsMany:             field.IsMany,
+				RelationTarget:     field.RelationTarget,
+				DefaultValue:       field.DefaultValue,
+				DefaultIsFunc:      field.DefaultIsFunc,
+				Validations:        convertValidations(field.Validations),
 			})
 		}
 
@@ -255,14 +244,25 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 			for _, e := range sorted {
 				sortedSet[e.Name] = true
 			}
+			cycleNames := make([]string, 0)
 			for _, e := range irProject.Entities {
 				if !sortedSet[e.Name] {
 					sorted = append(sorted, e)
+					cycleNames = append(cycleNames, e.Name)
 				}
 			}
+			// Store cycle info so callers can warn users.
+			irProject.CircularDeps = cycleNames
 		}
 
 		irProject.Entities = sorted
+
+		// Rebuild entityIndex so it points to the sorted entities.
+		// The old entityIndex references were invalidated by the sort copies.
+		entityIndex = make(map[string]*IREntity, len(irProject.Entities))
+		for i := range irProject.Entities {
+			entityIndex[irProject.Entities[i].Name] = &irProject.Entities[i]
+		}
 	}
 
 	return irProject, nil
@@ -298,7 +298,7 @@ func convertPermissions(source *parser.ParsedPermissions) *IRPermissions {
 
 func resolveDatabaseType(field *parser.ParsedField, schema *parser.ParsedSchema) string {
 	if field == nil || field.FieldDefinition == nil {
-		return "string"
+		return specmeta.DefaultFieldType
 	}
 
 	if field.IsRelation {
@@ -310,7 +310,7 @@ func resolveDatabaseType(field *parser.ParsedField, schema *parser.ParsedSchema)
 				}
 			}
 		}
-		return "string"
+		return specmeta.DefaultFieldType
 	}
 
 	if field.Type == "array" {
@@ -323,13 +323,13 @@ func resolveDatabaseType(field *parser.ParsedField, schema *parser.ParsedSchema)
 		if field.TargetType != "" {
 			return field.TargetType
 		}
-		return "string"
+		return specmeta.DefaultFieldType
 	}
 
 	if specmeta.IsPrimitive(field.Type) {
 		return field.Type
 	}
-	return "string"
+	return specmeta.DefaultFieldType
 }
 
 func resolveArrayType(targetType string) string {
@@ -353,7 +353,10 @@ func navigationName(field *parser.ParsedField) string {
 	if field.IsMany {
 		name = textutil.Singularize(name)
 	}
-	if strings.HasSuffix(strings.ToLower(name), "id") && len(name) > 2 {
+	// Strip "Id" or "ID" suffix (FK convention), not arbitrary "id" substrings.
+	if strings.HasSuffix(name, "Id") && len(name) > 2 {
+		name = name[:len(name)-2]
+	} else if strings.HasSuffix(name, "ID") && len(name) > 2 {
 		name = name[:len(name)-2]
 	}
 	if name == "" {
@@ -369,7 +372,12 @@ func convertAuth(source *parser.AuthConfig, schema *parser.ParsedSchema) *IRAuth
 
 	entity := source.Entity
 	if entity == "" {
-		entity = autoDetectAuthEntity(schema)
+		entity = specmeta.FindAuthEntity(schema.EntityOrder, specmeta.BuildEntityFields(schema.EntityOrder, func(name string) []string {
+			if e := schema.Entities[name]; e != nil {
+				return e.FieldOrder
+			}
+			return nil
+		}))
 	}
 
 	login := source.Endpoints.HasLogin()
@@ -388,26 +396,27 @@ func convertAuth(source *parser.AuthConfig, schema *parser.ParsedSchema) *IRAuth
 	}
 }
 
-// autoDetectAuthEntity finds the first entity with both "email" and "password" fields.
-func autoDetectAuthEntity(schema *parser.ParsedSchema) string {
-	for _, name := range schema.EntityOrder {
-		entity := schema.Entities[name]
-		if entity == nil {
-			continue
-		}
-		hasEmail := false
-		hasPassword := false
-		for _, fieldName := range entity.FieldOrder {
-			switch strings.ToLower(fieldName) {
-			case "email":
-				hasEmail = true
-			case "password":
-				hasPassword = true
-			}
-		}
-		if hasEmail && hasPassword {
-			return name
-		}
+func copyFeatureMap(source map[string]bool) map[string]bool {
+	if source == nil {
+		return nil
 	}
-	return ""
+	result := make(map[string]bool, len(source))
+	for k, v := range source {
+		result[k] = v
+	}
+	return result
+}
+
+// copyEnumsSorted returns a deep copy of the enums map with sorted keys for deterministic iteration.
+func copyEnumsSorted(source map[string][]string) map[string][]string {
+	if source == nil {
+		return nil
+	}
+	result := make(map[string][]string, len(source))
+	for k, v := range source {
+		cp := make([]string, len(v))
+		copy(cp, v)
+		result[k] = cp
+	}
+	return result
 }

@@ -44,6 +44,13 @@ func EnsureBridge(entry RegistryEntry) (string, error) {
 	if err := CloneBridge(entry); err != nil {
 		return "", err
 	}
+
+	// Verify the cloned repo contains bridge.yaml.
+	if !IsCached(entry) {
+		os.RemoveAll(cacheDir)
+		return "", fmt.Errorf("cloned bridge %q does not contain bridge.yaml", entry.ID)
+	}
+
 	return cacheDir, nil
 }
 

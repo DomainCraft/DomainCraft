@@ -4,16 +4,18 @@ import "github.com/DomainCraft/DomainCraft/internal/specmeta"
 
 // IRProject represents the intermediate project model.
 type IRProject struct {
-	Name     string
-	Database string
-	Auth     *IRAuthConfig
-	APIStyle string
-	Platform string // target platform version (e.g. "net9.0"), passed through to templates
-	Enums    map[string][]string
-	Entities []IREntity
-	Cache    *IRCacheConfig
-	CORS     *IRCORSConfig
-	Deploy   *IRDeployConfig
+	Name          string
+	Description   string
+	Database      string
+	Auth          *IRAuthConfig
+	APIStyle      string
+	Platform      string // target platform version (e.g. "net9.0"), passed through to templates
+	Enums         map[string][]string
+	Entities      []IREntity
+	Cache         *IRCacheConfig
+	CORS          *IRCORSConfig
+	Deploy        *IRDeployConfig
+	CircularDeps  []string // entity names involved in circular FK dependencies (empty if none)
 }
 
 // IRAuthConfig represents authentication configuration in IR.
@@ -58,35 +60,33 @@ type IRDeployConfig struct {
 
 // IREntity represents an entity in IR.
 type IREntity struct {
-	Name              string
-	NamePlural        string
-	HasAudit          bool
-	HasAuditLog       bool
-	HasSoftDelete     bool
-	HasOptimisticLock bool
-	Fields            []IRField
-	RelationsOut      []IRRelation
-	RelationsIn       []IRRelation
-	Indexes           []IRIndex
-	Seed              []map[string]interface{}
-	Permissions       *IRPermissions
+	Name         string
+	NamePlural   string
+	Features     map[string]bool
+	Fields       []IRField
+	RelationsOut []IRRelation
+	RelationsIn  []IRRelation
+	Indexes      []IRIndex
+	Seed         []map[string]interface{}
+	Permissions  *IRPermissions
 }
 
 // IRField represents a field in IR.
 type IRField struct {
-	Name           string
-	DatabaseType   string
-	NavigationName string // resolved navigation property name (for relation fields)
-	IsPrimary      bool
-	IsNullable     bool
-	IsUnique       bool
-	IsHidden       bool
-	IsRelation     bool
-	IsMany         bool
-	RelationTarget string
-	DefaultValue   string
-	DefaultIsFunc  bool
-	Validations    []IRValidation
+	Name               string
+	DatabaseType       string
+	DatabaseColumnName string // snake_case column name (computed once, used by templates)
+	NavigationName     string // resolved navigation property name (for relation fields)
+	IsPrimary          bool
+	IsNullable         bool
+	IsUnique           bool
+	IsHidden           bool
+	IsRelation         bool
+	IsMany             bool
+	RelationTarget     string
+	DefaultValue       string
+	DefaultIsFunc      bool
+	Validations        []IRValidation
 }
 
 // NonRelationFields returns only scalar/non-relation fields (excludes relation FK fields).
@@ -113,19 +113,23 @@ func (e IREntity) RelationFields() []IRField {
 
 // HasFeature returns true if the entity has the named feature enabled.
 func (e IREntity) HasFeature(name string) bool {
-	switch name {
-	case "audit":
-		return e.HasAudit
-	case "audit_log":
-		return e.HasAuditLog
-	case "soft_delete":
-		return e.HasSoftDelete
-	case "optimistic_lock":
-		return e.HasOptimisticLock
-	default:
-		return false
+	if e.Features != nil {
+		return e.Features[name]
 	}
+	return false
 }
+
+// HasAudit returns true if the entity has the audit feature enabled.
+func (e IREntity) HasAudit() bool { return e.HasFeature("audit") }
+
+// HasAuditLog returns true if the entity has the audit_log feature enabled.
+func (e IREntity) HasAuditLog() bool { return e.HasFeature("audit_log") }
+
+// HasSoftDelete returns true if the entity has the soft_delete feature enabled.
+func (e IREntity) HasSoftDelete() bool { return e.HasFeature("soft_delete") }
+
+// HasOptimisticLock returns true if the entity has the optimistic_lock feature enabled.
+func (e IREntity) HasOptimisticLock() bool { return e.HasFeature("optimistic_lock") }
 
 // IsArray returns true if the field's DatabaseType is an array type (e.g. "array(int)").
 func (f IRField) IsArray() bool {

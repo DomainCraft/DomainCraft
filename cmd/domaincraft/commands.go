@@ -12,6 +12,7 @@ import (
 	"github.com/DomainCraft/DomainCraft/internal/ir"
 	"github.com/DomainCraft/DomainCraft/internal/parser"
 	"github.com/DomainCraft/DomainCraft/internal/renderer"
+	"github.com/DomainCraft/DomainCraft/internal/specmeta"
 	"github.com/DomainCraft/DomainCraft/internal/validator"
 	"github.com/DomainCraft/DomainCraft/pkg/logger"
 
@@ -69,9 +70,9 @@ func newNewCmd() *cobra.Command {
 
 	cmd.Flags().String("name", "", "project name")
 	cmd.Flags().String("version", "1.0.0", "project version")
-	cmd.Flags().String("database", "postgresql", "database type (postgresql, mysql, sqlite, mssql, mongodb)")
-	cmd.Flags().String("auth", "none", "authentication type (jwt, none)")
-	cmd.Flags().String("api-style", "rest", "API style (rest, graphql, grpc)")
+	cmd.Flags().String("database", specmeta.Databases[0], "database type ("+strings.Join(specmeta.Databases, ", ")+")")
+	cmd.Flags().String("auth", specmeta.AuthTypes[len(specmeta.AuthTypes)-1], "authentication type ("+strings.Join(specmeta.AuthTypes, ", ")+")")
+	cmd.Flags().String("api-style", specmeta.APIStyles[0], "API style ("+strings.Join(specmeta.APIStyles, ", ")+")")
 
 	return cmd
 }
@@ -79,38 +80,49 @@ func newNewCmd() *cobra.Command {
 func runInteractiveNew(cmd *cobra.Command) error {
 	out := cmd.OutOrStdout()
 
-	name, _ := cmd.Flags().GetString("name")
+	name, err := cmd.Flags().GetString("name")
+	if err != nil {
+		return err
+	}
 	if name == "" {
-		var err error
 		name, err = interactive.PromptProjectName()
 		if err != nil {
 			return err
 		}
 	}
 
-	version, _ := cmd.Flags().GetString("version")
+	version, err := cmd.Flags().GetString("version")
+	if err != nil {
+		return err
+	}
 
-	database, _ := cmd.Flags().GetString("database")
+	database, err := cmd.Flags().GetString("database")
+	if err != nil {
+		return err
+	}
 	if !cmd.Flags().Changed("database") {
-		var err error
 		database, err = interactive.PromptDatabase()
 		if err != nil {
 			return err
 		}
 	}
 
-	auth, _ := cmd.Flags().GetString("auth")
+	auth, err := cmd.Flags().GetString("auth")
+	if err != nil {
+		return err
+	}
 	if !cmd.Flags().Changed("auth") {
-		var err error
 		auth, err = interactive.PromptAuth()
 		if err != nil {
 			return err
 		}
 	}
 
-	apiStyle, _ := cmd.Flags().GetString("api-style")
+	apiStyle, err := cmd.Flags().GetString("api-style")
+	if err != nil {
+		return err
+	}
 	if !cmd.Flags().Changed("api-style") {
-		var err error
 		apiStyle, err = interactive.PromptAPIStyle()
 		if err != nil {
 			return err
@@ -152,6 +164,17 @@ func runNonInteractiveNew(cmd *cobra.Command) error {
 	database, _ := cmd.Flags().GetString("database")
 	auth, _ := cmd.Flags().GetString("auth")
 	apiStyle, _ := cmd.Flags().GetString("api-style")
+
+	// Validate flag values against specmeta.
+	if !specmeta.IsDatabase(database) {
+		return fmt.Errorf("unknown database %q; allowed: %s", database, strings.Join(specmeta.Databases, ", "))
+	}
+	if !specmeta.IsAuthType(auth) {
+		return fmt.Errorf("unknown auth type %q; allowed: %s", auth, strings.Join(specmeta.AuthTypes, ", "))
+	}
+	if !specmeta.IsAPIStyle(apiStyle) {
+		return fmt.Errorf("unknown api style %q; allowed: %s", apiStyle, strings.Join(specmeta.APIStyles, ", "))
+	}
 
 	if err := scaffoldDomainYAML("domain.yaml", name, version, database, auth, apiStyle); err != nil {
 		return err
@@ -272,7 +295,9 @@ func newGenerateCmd() *cobra.Command {
 			log.Success("Generated %d file(s) into %s", len(writtenFiles), outputDir)
 
 			// --- Admin panel generation ---
-			if adminBridge == "" && !cmd.Flags().Changed("admin") && interactive.IsTerminal() {
+			if adminBridge == "" && !cmd.Flags().Changed("admin") && nonInteractive {
+				// In non-interactive mode, skip admin prompt — admin not requested.
+			} else if adminBridge == "" && !cmd.Flags().Changed("admin") && interactive.IsTerminal() {
 				generate, _ := interactive.PromptGenerateAdmin()
 				if generate {
 					adminBridge = "admin-refine"
@@ -334,15 +359,10 @@ func newBridgesCmd() *cobra.Command {
 
 // --- helpers ---
 
-// newResolver creates a shared bridge resolver.
-func newResolver() *bridge.Resolver {
-	return bridge.NewResolver(bridge.Default())
-}
-
 // resolveBridgeInteractive resolves the bridge from the --bridge flag, or
 // prompts the user interactively. Returns (path, displayName, error).
 func resolveBridgeInteractive() (string, string, error) {
-	resolver := newResolver()
+	resolver := bridge.NewResolver(bridge.Default())
 
 	if bridgePath != "" {
 		resolved, err := resolver.Resolve(bridgePath)
@@ -367,7 +387,7 @@ func resolveBridgeInteractive() (string, string, error) {
 }
 
 func generateAdminPanel(irProject *ir.IRProject, log *logger.Logger) error {
-	resolver := newResolver()
+	resolver := bridge.NewResolver(bridge.Default())
 
 	adminID := adminBridge
 	if adminID == "" {
@@ -395,7 +415,11 @@ func generateAdminPanel(irProject *ir.IRProject, log *logger.Logger) error {
 }
 
 func loadAndValidate(out io.Writer) (*parser.ParsedSchema, error) {
-	schema, err := loadSchema(domainFile)
+	data, err := os.ReadFile(domainFile)
+	if err != nil {
+		return nil, fmt.Errorf("read domain file: %w", err)
+	}
+	schema, err := parser.ParseYAML(data)
 	if err != nil {
 		return nil, err
 	}
@@ -416,12 +440,4 @@ func loadAndValidate(out io.Writer) (*parser.ParsedSchema, error) {
 	}
 
 	return schema, nil
-}
-
-func loadSchema(path string) (*parser.ParsedSchema, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read domain file: %w", err)
-	}
-	return parser.ParseYAML(data)
 }

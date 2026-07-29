@@ -10,10 +10,6 @@ import (
 	"github.com/DomainCraft/DomainCraft/pkg/textutil"
 )
 
-var validPermissionKeys = map[string]bool{
-	"read": true, "create": true, "update": true, "delete": true,
-}
-
 // Parser is the main parser for converting RawSchema to ParsedSchema
 type Parser struct {
 	raw *RawSchema
@@ -49,6 +45,7 @@ type ParsedField struct {
 	DatabaseColumnName string // generated from Name
 	IsRelation         bool
 	RelationTarget     string
+	RelationType       string // inferred by parser: many-to-one, one-to-one, many-to-many
 }
 
 // ParsedIndex represents a parsed index
@@ -155,16 +152,11 @@ func (p *Parser) parseEntity(name string, raw RawEntity) (*ParsedEntity, error) 
 
 	// Parse permissions
 	if raw.Permissions != nil {
-		for key := range raw.Permissions {
-			if !validPermissionKeys[key] {
-				return nil, fmt.Errorf("entity '%s': unknown permission key '%s'; valid keys: read, create, update, delete", name, key)
-			}
-		}
 		perms := &ParsedPermissions{
-			Read:   extractStringList(raw.Permissions, "read"),
-			Create: extractStringList(raw.Permissions, "create"),
-			Update: extractStringList(raw.Permissions, "update"),
-			Delete: extractStringList(raw.Permissions, "delete"),
+			Read:   raw.Permissions.Read,
+			Create: raw.Permissions.Create,
+			Update: raw.Permissions.Update,
+			Delete: raw.Permissions.Delete,
 		}
 		entity.Permissions = perms
 	}
@@ -183,9 +175,29 @@ func (p *Parser) parseField(name string, fieldDef string) (*ParsedField, error) 
 	}
 	fd.Name = name
 
+	// Semantic normalization: primary implies required, optional implies not required.
+	if fd.IsPrimary {
+		fd.IsRequired = true
+	}
+	if fd.IsOptional {
+		fd.IsRequired = false
+	}
+
 	// Sync required flag to validations map so templates can use HasValidation "required"
 	if fd.IsRequired {
 		fd.Validations["required"] = "true"
+	}
+
+	// Infer relation type for relation fields.
+	var relType string
+	if fd.Type == "relation" {
+		if fd.IsMany {
+			relType = "many-to-many"
+		} else if fd.IsUnique {
+			relType = "one-to-one"
+		} else {
+			relType = "many-to-one"
+		}
 	}
 
 	pf := &ParsedField{
@@ -193,6 +205,7 @@ func (p *Parser) parseField(name string, fieldDef string) (*ParsedField, error) 
 		DatabaseColumnName: toDatabaseColumnName(name),
 		IsRelation:         fd.Type == "relation",
 		RelationTarget:     fd.TargetEntity,
+		RelationType:       relType,
 	}
 
 	return pf, nil
@@ -213,9 +226,6 @@ func (p *Parser) addFeatureFields(entity *ParsedEntity) error {
 			continue
 		}
 		entity.Fields[fieldName] = newFeatureField(fieldName, def)
-		if def.IsOptional {
-			entity.Fields[fieldName].IsOptional = true
-		}
 		entity.FieldOrder = append(entity.FieldOrder, fieldName)
 	}
 	return nil
@@ -226,7 +236,8 @@ func newFeatureField(name string, def specmeta.FeatureFieldDef) *ParsedField {
 	fd := &lexer.FieldDefinition{
 		Name:          name,
 		Type:          def.Type,
-		IsRequired:    true,
+		IsRequired:    !def.IsOptional,
+		IsOptional:    def.IsOptional,
 		Validations:   make(map[string]string),
 		DefaultValue:  def.DefaultValue,
 		DefaultIsFunc: def.IsFuncDefault,
@@ -235,23 +246,6 @@ func newFeatureField(name string, def specmeta.FeatureFieldDef) *ParsedField {
 		FieldDefinition:    fd,
 		DatabaseColumnName: def.DBColumn,
 	}
-}
-
-// extractStringList extracts a []string from a raw YAML map at the given key.
-func extractStringList(raw map[string]interface{}, key string) []string {
-	val, ok := raw[key]
-	if !ok {
-		return nil
-	}
-	list, ok := val.([]interface{})
-	if !ok {
-		return nil
-	}
-	result := make([]string, 0, len(list))
-	for _, item := range list {
-		result = append(result, fmt.Sprint(item))
-	}
-	return result
 }
 
 // toDatabaseColumnName converts camelCase/PascalCase to snake_case.

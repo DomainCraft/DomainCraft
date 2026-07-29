@@ -1,5 +1,54 @@
 {
   "$defs": {
+    "AuthConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "endpoints": {
+          "$ref": "#/$defs/AuthEndpoints"
+        },
+        "entity": {
+          "description": "Entity with email+password fields (auto-detected if omitted)",
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "type": {
+          "enum": [
+            "jwt",
+            "none"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "AuthConfig",
+      "type": "object"
+    },
+    "AuthEndpoints": {
+      "additionalProperties": false,
+      "properties": {
+        "login": {
+          "description": "Generate login endpoint (default: true)",
+          "type": "boolean"
+        },
+        "me": {
+          "description": "Generate /me endpoint (default: true)",
+          "type": "boolean"
+        },
+        "register": {
+          "description": "Generate register endpoint (default: true)",
+          "type": "boolean"
+        }
+      },
+      "title": "AuthEndpoints",
+      "type": "object"
+    },
     "CORSConfig": {
       "additionalProperties": false,
       "properties": {
@@ -29,7 +78,12 @@
           "type": "boolean"
         },
         "provider": {
-          "description": "Cache provider (redis, memcached, etc.)",
+          "description": "Cache provider",
+          "enum": [
+            "redis",
+            "memcached",
+            "in-memory"
+          ],
           "type": "string"
         },
         "ttl_seconds": {
@@ -125,9 +179,6 @@
           },
           "type": "array"
         },
-        "read_public": {
-          "type": "string"
-        },
         "update": {
           "items": {
             "type": "string"
@@ -154,6 +205,13 @@
           "type": "array"
         },
         "type": {
+          "enum": [
+            "btree",
+            "hash",
+            "gist",
+            "gin",
+            "brin"
+          ],
           "type": "string"
         },
         "unique": {
@@ -173,6 +231,11 @@
           "type": "boolean"
         },
         "mode": {
+          "enum": [
+            "column",
+            "schema",
+            "database"
+          ],
           "type": "string"
         }
       },
@@ -231,7 +294,7 @@
       "type": "string"
     },
     "auth": {
-      "type": "string"
+      "$ref": "#/$defs/AuthConfig"
     },
     "database": {
       "enum": [

@@ -1,6 +1,7 @@
 package lexer
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -37,14 +38,14 @@ func TestParsePrimitiveTypes(t *testing.T) {
 
 func TestParseRelationType(t *testing.T) {
 	tests := []struct {
-		input       string
-		wantType    string
-		wantTarget  string
-		wantRelType string
+		input      string
+		wantType   string
+		wantTarget string
+		wantIsMany bool
 	}{
-		{"relation(User)", "relation", "User", "many-to-one"},
-		{"relation(Category) [unique]", "relation", "Category", "one-to-one"},
-		{"relation(Tag) [many]", "relation", "Tag", "many-to-many"},
+		{"relation(User)", "relation", "User", false},
+		{"relation(Category) [unique]", "relation", "Category", false},
+		{"relation(Tag) [many]", "relation", "Tag", true},
 	}
 
 	for _, tt := range tests {
@@ -60,8 +61,8 @@ func TestParseRelationType(t *testing.T) {
 			if fd.TargetEntity != tt.wantTarget {
 				t.Errorf("got target %v, want %v", fd.TargetEntity, tt.wantTarget)
 			}
-			if fd.RelationType != tt.wantRelType {
-				t.Errorf("got relType %v, want %v", fd.RelationType, tt.wantRelType)
+			if fd.IsMany != tt.wantIsMany {
+				t.Errorf("got IsMany %v, want %v", fd.IsMany, tt.wantIsMany)
 			}
 		})
 	}
@@ -222,5 +223,94 @@ func TestParseComplexField(t *testing.T) {
 	}
 	if fd.Validations["max"] != "120" {
 		t.Errorf("got max %v, want 120", fd.Validations["max"])
+	}
+}
+
+func TestParseRelationEmptyTarget(t *testing.T) {
+	_, err := ParseFieldString("relation()")
+	if err == nil {
+		t.Fatal("expected error for empty relation target")
+	}
+	if !strings.Contains(err.Error(), "requires a target entity name") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestParseArrayEmptyType(t *testing.T) {
+	_, err := ParseFieldString("array()")
+	if err == nil {
+		t.Fatal("expected error for empty array type")
+	}
+	if !strings.Contains(err.Error(), "requires an element type") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestParseEnumEmptyName(t *testing.T) {
+	_, err := ParseFieldString("enum()")
+	if err == nil {
+		t.Fatal("expected error for empty enum name")
+	}
+	if !strings.Contains(err.Error(), "requires a name") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestParsePrimaryKeyIsRequired(t *testing.T) {
+	// The lexer no longer normalizes primary→required; that's the parser's job.
+	// The lexer only parses syntax; semantic normalization happens in parser.parseField.
+	fd, err := ParseFieldString("uuid [primary]")
+	if err != nil {
+		t.Fatalf("ParseFieldString() error = %v", err)
+	}
+	if !fd.IsPrimary {
+		t.Error("expected IsPrimary=true")
+	}
+	// IsRequired is NOT set by the lexer — parser handles this.
+	if fd.IsRequired {
+		t.Error("lexer should not set IsRequired for primary (parser handles normalization)")
+	}
+}
+
+func TestParsePrimaryKeyWithExplicitRequired(t *testing.T) {
+	fd, err := ParseFieldString("uuid [primary, required]")
+	if err != nil {
+		t.Fatalf("ParseFieldString() error = %v", err)
+	}
+	if !fd.IsPrimary {
+		t.Error("expected IsPrimary=true")
+	}
+	if !fd.IsRequired {
+		t.Error("expected IsRequired=true for primary key with explicit required")
+	}
+}
+
+func TestParseOnDeleteOnNonRelationField(t *testing.T) {
+	_, err := ParseFieldString("string [on_delete:cascade]")
+	if err == nil {
+		t.Fatal("expected error for on_delete on non-relation field")
+	}
+	if !strings.Contains(err.Error(), "on_delete is only valid on relation fields") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestParseManyOnNonRelationField(t *testing.T) {
+	_, err := ParseFieldString("string [many]")
+	if err == nil {
+		t.Fatal("expected error for many on non-relation field")
+	}
+	if !strings.Contains(err.Error(), "many modifier is only valid on relation fields") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestParseRequiredOptionalConflict(t *testing.T) {
+	_, err := ParseFieldString("string [required, optional]")
+	if err == nil {
+		t.Fatal("expected error for required+optional conflict")
+	}
+	if !strings.Contains(err.Error(), "cannot be both required and optional") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }

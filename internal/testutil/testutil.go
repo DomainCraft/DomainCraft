@@ -2,10 +2,12 @@
 package testutil
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/DomainCraft/DomainCraft/internal/lexer"
 	"github.com/DomainCraft/DomainCraft/internal/parser"
+	"github.com/DomainCraft/DomainCraft/pkg/textutil"
 )
 
 // MustParsedField parses a field definition string and returns a *ParsedField.
@@ -17,5 +19,13 @@ func MustParsedField(t *testing.T, name, input string) *parser.ParsedField {
 		t.Fatalf("ParseFieldString(%q) error = %v", input, err)
 	}
 	fieldDef.Name = name
-	return &parser.ParsedField{FieldDefinition: fieldDef}
+	return &parser.ParsedField{
+		FieldDefinition:    fieldDef,
+		DatabaseColumnName: toDatabaseColumnName(name),
+	}
+}
+
+// toDatabaseColumnName converts a field name to snake_case for DatabaseColumnName.
+func toDatabaseColumnName(fieldName string) string {
+	return strings.ToLower(strings.Join(textutil.SplitIdentifier(fieldName), "_"))
 }

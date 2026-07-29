@@ -23,9 +23,8 @@ type FieldDefinition struct {
 	IsRequired bool
 
 	// Relations
-	RelationType string // one-to-one, one-to-many, many-to-many
-	OnDelete     string // cascade, set_null, restrict, no_action
-	IsMany       bool   // for many-to-many
+	OnDelete string // cascade, set_null, restrict, no_action
+	IsMany   bool   // for many-to-many (parser infers RelationType from this)
 
 	// Validation
 	Validations   map[string]string // min, max, email, url, regex, gte, lt, lte, gt
@@ -36,12 +35,11 @@ type FieldDefinition struct {
 // Lexer parses field definition strings into FieldDefinition
 type Lexer struct {
 	input string
-	pos   int
 }
 
 // NewLexer creates a new Lexer
 func NewLexer(input string) *Lexer {
-	return &Lexer{input: strings.TrimSpace(input), pos: 0}
+	return &Lexer{input: strings.TrimSpace(input)}
 }
 
 // Parse parses a full field definition: "string [required, max:255]"
@@ -89,6 +87,9 @@ func (l *Lexer) parseType(typeStr string, fd *FieldDefinition) error {
 		targetEntity := strings.TrimPrefix(typeStr, "relation(")
 		targetEntity = strings.TrimSuffix(targetEntity, ")")
 		fd.TargetEntity = strings.TrimSpace(targetEntity)
+		if fd.TargetEntity == "" {
+			return fmt.Errorf("relation type requires a target entity name")
+		}
 		return nil
 	}
 
@@ -98,6 +99,9 @@ func (l *Lexer) parseType(typeStr string, fd *FieldDefinition) error {
 		innerType := strings.TrimPrefix(typeStr, "array(")
 		innerType = strings.TrimSuffix(innerType, ")")
 		fd.TargetType = strings.TrimSpace(innerType)
+		if fd.TargetType == "" {
+			return fmt.Errorf("array type requires an element type")
+		}
 		return nil
 	}
 
@@ -107,6 +111,9 @@ func (l *Lexer) parseType(typeStr string, fd *FieldDefinition) error {
 		enumName := strings.TrimPrefix(typeStr, "enum(")
 		enumName = strings.TrimSuffix(enumName, ")")
 		fd.TargetType = strings.TrimSpace(enumName)
+		if fd.TargetType == "" {
+			return fmt.Errorf("enum type requires a name")
+		}
 		return nil
 	}
 
@@ -138,27 +145,25 @@ func (l *Lexer) parseModifiers(modStr string, fd *FieldDefinition) error {
 			// Strip quotes if present
 			value = strings.Trim(value, `"'`)
 
-			switch key {
-			case "min", "max", "gte", "gt", "lte", "lt":
-				fd.Validations[key] = value
-			case "default":
-				// Check for function-style defaults like now(), uuid()
-				if strings.HasSuffix(value, "()") {
-					fd.DefaultIsFunc = true
-					fd.DefaultValue = value[:len(value)-2] // strip ()
-				} else {
-					fd.DefaultValue = value
-				}
-			case "on_delete":
-				if !specmeta.IsOnDeleteValue(value) {
-					return fmt.Errorf("unknown on_delete value: %s. valid: cascade, set_null, restrict, no_action", value)
-				}
-				fd.OnDelete = value
-			case "regex":
-				fd.Validations["regex"] = value
-			default:
-				return fmt.Errorf("unknown modifier: %s", key)
+		switch key {
+		case "min", "max", "gte", "gt", "lte", "lt", "regex":
+			fd.Validations[key] = value
+		case "default":
+			// Check for function-style defaults like now(), uuid()
+			if strings.HasSuffix(value, "()") {
+				fd.DefaultIsFunc = true
+				fd.DefaultValue = value[:len(value)-2] // strip ()
+			} else {
+				fd.DefaultValue = value
 			}
+		case "on_delete":
+			if !specmeta.IsOnDeleteValue(value) {
+				return fmt.Errorf("unknown on_delete value: %s. valid: cascade, set_null, restrict, no_action", value)
+			}
+			fd.OnDelete = value
+		default:
+			return fmt.Errorf("unknown modifier: %s", key)
+		}
 			continue
 		}
 
@@ -176,7 +181,6 @@ func (l *Lexer) parseModifiers(modStr string, fd *FieldDefinition) error {
 			fd.IsHidden = true
 		case "many":
 			fd.IsMany = true
-			fd.RelationType = "many-to-many"
 		case "email":
 			fd.Validations["email"] = "true"
 		case "url":
@@ -198,19 +202,19 @@ func (fd *FieldDefinition) Validate() error {
 		return fmt.Errorf("field cannot be both primary and optional")
 	}
 
-	// Primary implies required
-	if fd.IsPrimary {
-		fd.IsRequired = true
+	// Cannot be both required and optional
+	if fd.IsRequired && fd.IsOptional {
+		return fmt.Errorf("field cannot be both required and optional")
 	}
 
-	// If both primary and required, ignore redundant required
-	if fd.IsPrimary && fd.IsRequired {
-		fd.IsRequired = false // Primary already implies required
+	// on_delete is only valid on relation fields
+	if fd.OnDelete != "" && fd.Type != "relation" {
+		return fmt.Errorf("on_delete is only valid on relation fields")
 	}
 
-	// Optional implies not required
-	if fd.IsOptional {
-		fd.IsRequired = false
+	// many modifier is only valid on relation fields
+	if fd.IsMany && fd.Type != "relation" {
+		return fmt.Errorf("many modifier is only valid on relation fields")
 	}
 
 	// on_delete:set_null is only valid for optional relation fields
@@ -222,14 +226,6 @@ func (fd *FieldDefinition) Validate() error {
 	if regex, ok := fd.Validations["regex"]; ok {
 		if _, err := regexp.Compile(regex); err != nil {
 			return fmt.Errorf("invalid regex '%s': %v", regex, err)
-		}
-	}
-
-	// Set default relation type for relation fields
-	if fd.Type == "relation" && fd.RelationType == "" {
-		fd.RelationType = "many-to-one"
-		if fd.IsUnique {
-			fd.RelationType = "one-to-one"
 		}
 	}
 

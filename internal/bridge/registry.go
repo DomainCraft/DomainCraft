@@ -58,13 +58,4 @@ func (r *Registry) ByID(id string) *RegistryEntry {
 	return nil
 }
 
-// ByLanguage returns all bridges for a given language.
-func (r *Registry) ByLanguage(lang string) []RegistryEntry {
-	var result []RegistryEntry
-	for _, e := range r.entries {
-		if e.Language == lang {
-			result = append(result, e)
-		}
-	}
-	return result
-}
+

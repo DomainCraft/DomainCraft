@@ -37,7 +37,7 @@ func buildSchema() map[string]any {
 		"properties": map[string]any{
 			"project":   map[string]any{"$ref": "#/$defs/Project"},
 			"database":  map[string]any{"type": "string", "enum": specmeta.Databases},
-			"auth":      map[string]any{"type": "string"},
+			"auth":      map[string]any{"$ref": "#/$defs/AuthConfig"},
 			"api_style": map[string]any{"type": "string", "enum": specmeta.APIStyles},
 			"enums": map[string]any{
 				"type": "object",
@@ -83,7 +83,7 @@ func buildSchema() map[string]any {
 				"additionalProperties": false,
 				"properties": map[string]any{
 					"enabled":           map[string]any{"type": "boolean"},
-					"provider":          map[string]any{"type": "string", "description": "Cache provider (redis, memcached, etc.)"},
+					"provider":          map[string]any{"type": "string", "enum": specmeta.CacheProviders, "description": "Cache provider"},
 					"connection_string": map[string]any{"type": "string"},
 					"ttl_seconds":       map[string]any{"type": "integer", "minimum": 0},
 				},
@@ -108,7 +108,7 @@ func buildSchema() map[string]any {
 				"additionalProperties": false,
 				"properties": map[string]any{
 					"enabled": map[string]any{"type": "boolean"},
-					"mode":    map[string]any{"type": "string"},
+					"mode":    map[string]any{"type": "string", "enum": specmeta.MultiTenancyModes},
 				},
 				"required": []string{"enabled"},
 			},
@@ -157,7 +157,7 @@ func buildSchema() map[string]any {
 						"type":  "array",
 						"items": map[string]any{"type": "string"},
 					},
-					"type":   map[string]any{"type": "string"},
+					"type":   map[string]any{"type": "string", "enum": specmeta.IndexTypes},
 					"sort":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 					"unique": map[string]any{"type": "boolean"},
 				},
@@ -168,11 +168,32 @@ func buildSchema() map[string]any {
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]any{
-					"read":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"create":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"update":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"delete":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"read_public": map[string]any{"type": "string"},
+					"read":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"create": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"update": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"delete": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				},
+			},
+			"AuthConfig": map[string]any{
+				"title":                "AuthConfig",
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"type":      map[string]any{"type": "string", "enum": specmeta.AuthTypes},
+					"entity":    map[string]any{"type": "string", "description": "Entity with email+password fields (auto-detected if omitted)"},
+					"roles":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"endpoints": map[string]any{"$ref": "#/$defs/AuthEndpoints"},
+				},
+				"required": []string{"type"},
+			},
+			"AuthEndpoints": map[string]any{
+				"title":                "AuthEndpoints",
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"login":    map[string]any{"type": "boolean", "description": "Generate login endpoint (default: true)"},
+					"register": map[string]any{"type": "boolean", "description": "Generate register endpoint (default: true)"},
+					"me":       map[string]any{"type": "boolean", "description": "Generate /me endpoint (default: true)"},
 				},
 			},
 		},

@@ -103,9 +103,13 @@ func PromptDatabase() (string, error) {
 // PromptAuth asks for the authentication type interactively.
 func PromptAuth() (string, error) {
 	var auth string
-	options := []huh.Option[string]{
-		huh.NewOption("JWT (recommended)", "jwt"),
-		huh.NewOption("None", "none"),
+	options := make([]huh.Option[string], len(specmeta.AuthTypes))
+	for i, a := range specmeta.AuthTypes {
+		label := a
+		if i == 0 {
+			label += " (recommended)"
+		}
+		options[i] = huh.NewOption(label, a)
 	}
 	form := huh.NewForm(
 		huh.NewGroup(

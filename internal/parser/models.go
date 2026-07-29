@@ -1,6 +1,11 @@
 package parser
 
-import "gopkg.in/yaml.v3"
+import (
+	"fmt"
+
+	"github.com/DomainCraft/DomainCraft/internal/specmeta"
+	"gopkg.in/yaml.v3"
+)
 
 // RawSchema represents the root structure of domain.yaml
 type RawSchema struct {
@@ -76,12 +81,20 @@ type MultiTenancyConfig struct {
 
 // RawEntity represents an unprocessed entity from YAML
 type RawEntity struct {
-	Features    []string                 `yaml:"features"`
-	Fields      map[string]string        `yaml:"fields"`
-	FieldOrder  []string                 // preserved from YAML — not a yaml tag
-	Indexes     []RawIndex               `yaml:"indexes"`
-	Permissions map[string]interface{}   `yaml:"permissions"`
+	Features    []string               `yaml:"features"`
+	Fields      map[string]string      `yaml:"fields"`
+	FieldOrder  []string               // preserved from YAML — not a yaml tag
+	Indexes     []RawIndex             `yaml:"indexes"`
+	Permissions *RawPermissions        `yaml:"permissions"`
 	Seed        []map[string]interface{} `yaml:"seed"`
+}
+
+// RawPermissions represents entity permissions before parsing.
+type RawPermissions struct {
+	Read   []string `yaml:"read"`
+	Create []string `yaml:"create"`
+	Update []string `yaml:"update"`
+	Delete []string `yaml:"delete"`
 }
 
 // UnmarshalYAML preserves field order from the YAML mapping node.
@@ -123,11 +136,13 @@ func (e *RawEntity) UnmarshalYAML(value *yaml.Node) error {
 			if err := valNode.Decode(&e.Permissions); err != nil {
 				return err
 			}
-		case "seed":
-			if err := valNode.Decode(&e.Seed); err != nil {
-				return err
-			}
+	case "seed":
+		if err := valNode.Decode(&e.Seed); err != nil {
+			return err
 		}
+	default:
+		return fmt.Errorf("unknown entity key %q; valid keys: features, fields, indexes, permissions, seed", key)
+	}
 	}
 
 	// Ensure non-nil slices
@@ -155,13 +170,23 @@ func ParseRawSchema(data []byte) (*RawSchema, error) {
 
 	// Set defaults
 	if schema.Database == "" {
-		schema.Database = "postgresql"
+		schema.Database = specmeta.Databases[0]
 	}
 	if schema.Auth.Type == "" {
-		schema.Auth.Type = "none"
+		schema.Auth.Type = specmeta.AuthTypes[len(specmeta.AuthTypes)-1] // "none"
 	}
 	if schema.APIStyle == "" {
-		schema.APIStyle = "rest"
+		schema.APIStyle = specmeta.APIStyles[0]
+	}
+	// Deploy defaults — consistent with parser setting other defaults.
+	if schema.Project.Deploy == nil {
+		schema.Project.Deploy = &DeployConfig{}
+	}
+	if schema.Project.Deploy.Port == 0 {
+		schema.Project.Deploy.Port = 8080
+	}
+	if schema.Project.Deploy.Domain == "" {
+		schema.Project.Deploy.Domain = "localhost"
 	}
 
 	return schema, nil

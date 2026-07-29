@@ -3,14 +3,13 @@ package renderer
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
-	"time"
 
 	"github.com/DomainCraft/DomainCraft/internal/ir"
+	"github.com/DomainCraft/DomainCraft/internal/packages"
 	"github.com/DomainCraft/DomainCraft/internal/specmeta"
 	"github.com/DomainCraft/DomainCraft/pkg/logger"
 	"github.com/DomainCraft/DomainCraft/pkg/textutil"
@@ -114,6 +113,15 @@ func (r *Renderer) buildFuncMap() (template.FuncMap, error) {
 	funcMap["enumTypeName"] = func(dbType string) string {
 		return specmeta.ParseArrayInner(dbType)
 	}
+	// isPublicPermission checks if any role in the slice is the wildcard "*" (public access).
+	funcMap["isPublicPermission"] = func(roles []string) bool {
+		for _, r := range roles {
+			if r == "*" {
+				return true
+			}
+		}
+		return false
+	}
 
 	// Bridge-specific functions
 	bridgeFuncs, err := r.getBridgeSpecificFuncs()
@@ -149,12 +157,12 @@ func (r *Renderer) getBridgeSpecificFuncs() (map[string]interface{}, error) {
 
 		arrayFormat := mapping.ArrayFormat
 		if arrayFormat == "" {
-			arrayFormat = "%s[]" // fallback: generic array syntax
+			arrayFormat = "%s[]" // default: generic array syntax (override in type_mappings.yaml for target language)
 		}
 
 		nullableSuffix := mapping.NullableFormat
 		if nullableSuffix == "" {
-			nullableSuffix = "?" // fallback: C#/TS convention
+			nullableSuffix = "" // no default — bridges must set nullable_format explicitly
 		}
 
 		// wrapNullable applies the bridge-specific nullable format to a type name.
@@ -202,7 +210,7 @@ func (r *Renderer) getBridgeSpecificFuncs() (map[string]interface{}, error) {
 				if mapped, ok := mapping.Types[inner]; ok {
 					return wrapArray(mapped)
 				}
-				return wrapArray("string")
+				return wrapArray(inner)
 			}
 
 			return dbType
@@ -221,15 +229,6 @@ func (r *Renderer) getBridgeSpecificFuncs() (map[string]interface{}, error) {
 				return v
 			}
 			return textutil.PascalCase(value)
-		}
-
-		bridgeFuncs["isPublicPermission"] = func(roles []string) bool {
-			for _, r := range roles {
-				if r == "*" {
-					return true
-				}
-			}
-			return false
 		}
 
 		// inputType maps IR database types to UI input components (e.g. "string" -> "Input", "datetime" -> "DatePicker").
@@ -328,8 +327,14 @@ func (r *Renderer) Render(project *ir.IRProject, outputDir string) ([]string, er
 				}
 
 				absoluteTarget := filepath.Join(outputDir, filepath.FromSlash(renderedTarget))
-				absOutput, _ := filepath.Abs(outputDir)
-				absTarget, _ := filepath.Abs(absoluteTarget)
+				absOutput, err := filepath.Abs(outputDir)
+				if err != nil {
+					return nil, fmt.Errorf("resolve output directory: %w", err)
+				}
+				absTarget, err := filepath.Abs(absoluteTarget)
+				if err != nil {
+					return nil, fmt.Errorf("resolve target path: %w", err)
+				}
 				if !strings.HasPrefix(absTarget, absOutput+string(filepath.Separator)) {
 					return nil, fmt.Errorf("template target path escapes output directory: %s", renderedTarget)
 				}
@@ -426,13 +431,6 @@ func (r *Renderer) shouldRenderContext(spec TemplateSpec, context RenderContext)
 	}
 }
 
-// warn logs a warning if a logger is configured.
-func (r *Renderer) warn(format string, args ...interface{}) {
-	if r.log != nil {
-		r.log.Warn(format, args...)
-	}
-}
-
 // containsOwnerToken checks if any role in the slice starts with "@" (ownership token).
 func containsOwnerToken(roles []string) bool {
 	for _, r := range roles {
@@ -451,9 +449,9 @@ func (r *Renderer) resolvePackages() map[string]string {
 
 	result := make(map[string]string, len(r.config.RegistryPackages))
 	for key, packageID := range r.config.RegistryPackages {
-		version, err := resolveRegistryVersion(r.config.RegistryURL, packageID)
+		version, err := packages.ResolveVersion(r.config.RegistryURL, packageID)
 		if err != nil {
-			r.warn("failed to resolve package %s: %v", packageID, err)
+			r.log.Warn("failed to resolve package %s: %v", packageID, err)
 			continue
 		}
 		if version != "" {
@@ -480,7 +478,11 @@ func (r *Renderer) renderContexts(scope string, project *ir.IRProject, pkgs map[
 
 func resolveBridgePath(bridgePath string) (string, string) {
 	info, err := os.Stat(bridgePath)
-	if err == nil && info.IsDir() {
+	if err != nil {
+		// Path does not exist or is not accessible — treat as file path.
+		return filepath.Dir(bridgePath), bridgePath
+	}
+	if info.IsDir() {
 		return bridgePath, filepath.Join(bridgePath, "bridge.yaml")
 	}
 	return filepath.Dir(bridgePath), bridgePath
@@ -514,7 +516,7 @@ func rawSeedValue(value any, dbType string) string {
 	if specmeta.IsNumeric(dbType) {
 		return strings.Trim(strVal, "\"")
 	}
-	if dbType == "boolean" {
+	if specmeta.IsBooleanType(dbType) {
 		strVal = strings.ToLower(strings.Trim(strVal, "\""))
 		if strVal == "true" || strVal == "1" {
 			return "true"
@@ -522,76 +524,4 @@ func rawSeedValue(value any, dbType string) string {
 		return "false"
 	}
 	return jsonValue(value)
-}
-
-var registryClient = &http.Client{Timeout: 5 * time.Second}
-
-// resolveRegistryVersion queries a package registry (e.g. NuGet) for the latest stable version
-// of a package. The registryURL template must contain {id} which is replaced with the package ID.
-func resolveRegistryVersion(registryURL string, packageID string) (string, error) {
-	url := strings.ReplaceAll(registryURL, "{id}", strings.ToLower(packageID))
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return "", err
-	}
-
-	resp, err := registryClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("registry returned %d for %s", resp.StatusCode, packageID)
-	}
-
-	var result struct {
-		Versions []string `json:"versions"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
-	}
-
-	// Filter for stable versions (no pre-release suffix) and find the maximum.
-	var best string
-	for _, v := range result.Versions {
-		if strings.ContainsAny(v, "-") {
-			continue
-		}
-		if best == "" || versionGreater(v, best) {
-			best = v
-		}
-	}
-	if best == "" {
-		return "", fmt.Errorf("no stable versions found for %s", packageID)
-	}
-
-	return best, nil
-}
-
-// versionGreater compares two semver strings and returns true if a > b.
-func versionGreater(a, b string) bool {
-	aParts := strings.Split(a, ".")
-	bParts := strings.Split(b, ".")
-	maxLen := len(aParts)
-	if len(bParts) > maxLen {
-		maxLen = len(bParts)
-	}
-	for i := 0; i < maxLen; i++ {
-		var ai, bi int
-		if i < len(aParts) {
-			fmt.Sscanf(aParts[i], "%d", &ai)
-		}
-		if i < len(bParts) {
-			fmt.Sscanf(bParts[i], "%d", &bi)
-		}
-		if ai > bi {
-			return true
-		}
-		if ai < bi {
-			return false
-		}
-	}
-	return false
 }

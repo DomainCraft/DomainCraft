@@ -25,11 +25,6 @@ func (l *Logger) SetWriter(w io.Writer) {
 	l.writer = w
 }
 
-// SetColors enables or disables colored output.
-func (l *Logger) SetColors(enabled bool) {
-	l.useColors = enabled
-}
-
 // Info logs a key stage message (e.g. "Validating schema...").
 func (l *Logger) Info(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
