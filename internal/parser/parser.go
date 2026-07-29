@@ -10,6 +10,10 @@ import (
 	"github.com/DomainCraft/DomainCraft/pkg/textutil"
 )
 
+var validPermissionKeys = map[string]bool{
+	"read": true, "create": true, "update": true, "delete": true,
+}
+
 // Parser is the main parser for converting RawSchema to ParsedSchema
 type Parser struct {
 	raw *RawSchema
@@ -58,11 +62,10 @@ type ParsedIndex struct {
 
 // ParsedPermissions represents parsed permissions
 type ParsedPermissions struct {
-	Read       []string
-	Create     []string
-	Update     []string
-	Delete     []string
-	ReadPublic string // condition expression
+	Read   []string
+	Create []string
+	Update []string
+	Delete []string
 }
 
 // NewParser creates a new Parser
@@ -124,13 +127,8 @@ func (p *Parser) parseEntity(name string, raw RawEntity) (*ParsedEntity, error) 
 		return nil, err
 	}
 
-	// Parse fields in sorted order for deterministic output.
-	fieldNames := make([]string, 0, len(raw.Fields))
-	for fieldName := range raw.Fields {
-		fieldNames = append(fieldNames, fieldName)
-	}
-	sort.Strings(fieldNames)
-	for _, fieldName := range fieldNames {
+	// Parse fields in YAML order (preserved by RawEntity.UnmarshalYAML).
+	for _, fieldName := range raw.FieldOrder {
 		fieldDef := raw.Fields[fieldName]
 		field, err := p.parseField(fieldName, fieldDef)
 		if err != nil {
@@ -157,14 +155,16 @@ func (p *Parser) parseEntity(name string, raw RawEntity) (*ParsedEntity, error) 
 
 	// Parse permissions
 	if raw.Permissions != nil {
-		perms := &ParsedPermissions{
-			Read:       extractStringList(raw.Permissions, "read"),
-			Create:     extractStringList(raw.Permissions, "create"),
-			Update:     extractStringList(raw.Permissions, "update"),
-			Delete:     extractStringList(raw.Permissions, "delete"),
+		for key := range raw.Permissions {
+			if !validPermissionKeys[key] {
+				return nil, fmt.Errorf("entity '%s': unknown permission key '%s'; valid keys: read, create, update, delete", name, key)
+			}
 		}
-		if readPublic, ok := raw.Permissions["read_public"]; ok {
-			perms.ReadPublic = fmt.Sprint(readPublic)
+		perms := &ParsedPermissions{
+			Read:   extractStringList(raw.Permissions, "read"),
+			Create: extractStringList(raw.Permissions, "create"),
+			Update: extractStringList(raw.Permissions, "update"),
+			Delete: extractStringList(raw.Permissions, "delete"),
 		}
 		entity.Permissions = perms
 	}
@@ -182,6 +182,11 @@ func (p *Parser) parseField(name string, fieldDef string) (*ParsedField, error) 
 		return nil, err
 	}
 	fd.Name = name
+
+	// Sync required flag to validations map so templates can use HasValidation "required"
+	if fd.IsRequired {
+		fd.Validations["required"] = "true"
+	}
 
 	pf := &ParsedField{
 		FieldDefinition:    fd,

@@ -46,6 +46,22 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 			Origins: append([]string(nil), schema.Project.CORS.Origins...),
 		}
 	}
+	if schema.Project.Deploy != nil {
+		port := schema.Project.Deploy.Port
+		if port == 0 {
+			port = 8080
+		}
+		domain := schema.Project.Deploy.Domain
+		if domain == "" {
+			domain = "localhost"
+		}
+		irProject.Deploy = &IRDeployConfig{
+			Domain: domain,
+			Port:   port,
+		}
+	} else {
+		irProject.Deploy = &IRDeployConfig{Domain: "localhost", Port: 8080}
+	}
 
 	entityIndex := make(map[string]*IREntity, len(schema.Entities))
 	for _, entityName := range schema.EntityOrder {
@@ -124,26 +140,15 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 				return nil, fmt.Errorf("relation target '%s' referenced by '%s.%s' does not exist", field.RelationTarget, irEntity.Name, field.Name)
 			}
 
-			relationType := field.RelationType
-			if relationType == "" {
-				relationType = "many-to-one"
-				if field.IsUnique {
-					relationType = "one-to-one"
-				}
-				if field.IsMany {
-					relationType = "many-to-many"
-				}
-			}
-
 			relation := IRRelation{
 				FieldName:        field.Name,
 				TargetEntity:     targetEntity,
 				NavigationName:   navigationName(field),
 				InverseNavName:   textutil.Pluralize(irEntity.Name),
-				OnDeleteBehavior: normalizeDeleteBehavior(field.OnDelete),
+				OnDeleteBehavior: field.OnDelete,
 				IsNullable:       field.IsOptional,
 				IsMany:           field.IsMany,
-				RelationType:     relationType,
+				RelationType:     field.RelationType,
 			}
 
 			irEntity.RelationsOut = append(irEntity.RelationsOut, relation)
@@ -161,10 +166,9 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 				targetEntity.RelationsIn = append(targetEntity.RelationsIn, IRRelation{
 					FieldName:        relation.FieldName,
 					TargetEntity:     irEntity,
-					NavigationName:   relation.NavigationName,
 					InverseNavName:   relation.InverseNavName,
 					OnDeleteBehavior: relation.OnDeleteBehavior,
-					IsMany:           !relation.IsMany, // Inverse cardinality: one-to-many becomes many-to-one on the target
+					IsMany:           !relation.IsMany,
 					RelationType:     relation.RelationType,
 				})
 			}
@@ -285,11 +289,10 @@ func convertPermissions(source *parser.ParsedPermissions) *IRPermissions {
 		return nil
 	}
 	return &IRPermissions{
-		Read:       append([]string(nil), source.Read...),
-		Create:     append([]string(nil), source.Create...),
-		Update:     append([]string(nil), source.Update...),
-		Delete:     append([]string(nil), source.Delete...),
-		ReadPublic: source.ReadPublic,
+		Read:   append([]string(nil), source.Read...),
+		Create: append([]string(nil), source.Create...),
+		Update: append([]string(nil), source.Update...),
+		Delete: append([]string(nil), source.Delete...),
 	}
 }
 
@@ -407,19 +410,4 @@ func autoDetectAuthEntity(schema *parser.ParsedSchema) string {
 		}
 	}
 	return ""
-}
-
-func normalizeDeleteBehavior(value string) string {
-	switch strings.ToLower(value) {
-	case "cascade":
-		return "CASCADE"
-	case "set_null":
-		return "SET NULL"
-	case "restrict":
-		return "RESTRICT"
-	case "no_action":
-		return "NO ACTION"
-	default:
-		return strings.ToUpper(strings.NewReplacer("_", " ", "-", " ").Replace(value))
-	}
 }

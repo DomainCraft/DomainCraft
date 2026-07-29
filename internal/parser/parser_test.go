@@ -300,7 +300,6 @@ entities:
       create: [User, Admin]
       update: ["@Owner"]
       delete: [Admin]
-      read_public: "condition(isPublished == true)"
 `)
 
 	parsed, err := ParseYAML(yamlData)
@@ -315,8 +314,5 @@ entities:
 
 	if len(doc.Permissions.Read) != 2 {
 		t.Errorf("got %d read permissions, want 2", len(doc.Permissions.Read))
-	}
-	if doc.Permissions.ReadPublic != "condition(isPublished == true)" {
-		t.Errorf("got read_public %v", doc.Permissions.ReadPublic)
 	}
 }

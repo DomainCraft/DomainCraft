@@ -31,9 +31,6 @@ type FieldDefinition struct {
 	Validations   map[string]string // min, max, email, url, regex, gte, lt, lte, gt
 	DefaultValue  string
 	DefaultIsFunc bool // true if default:now()
-
-	// Original string for debugging
-	RawString string
 }
 
 // Lexer parses field definition strings into FieldDefinition
@@ -50,7 +47,6 @@ func NewLexer(input string) *Lexer {
 // Parse parses a full field definition: "string [required, max:255]"
 func (l *Lexer) Parse() (*FieldDefinition, error) {
 	fd := &FieldDefinition{
-		RawString:   l.input,
 		Validations: make(map[string]string),
 	}
 
@@ -244,20 +240,4 @@ func (fd *FieldDefinition) Validate() error {
 func ParseFieldString(fieldString string) (*FieldDefinition, error) {
 	lexer := NewLexer(fieldString)
 	return lexer.Parse()
-}
-
-// ParseFieldsMap parses a map of fields (as in RawEntity.Fields)
-func ParseFieldsMap(fieldsMap map[string]string) (map[string]*FieldDefinition, error) {
-	result := make(map[string]*FieldDefinition)
-
-	for fieldName, fieldDef := range fieldsMap {
-		fd, err := ParseFieldString(fieldDef)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing field '%s': %w", fieldName, err)
-		}
-		fd.Name = fieldName
-		result[fieldName] = fd
-	}
-
-	return result, nil
 }

@@ -224,28 +224,3 @@ func TestParseComplexField(t *testing.T) {
 		t.Errorf("got max %v, want 120", fd.Validations["max"])
 	}
 }
-
-func TestParseFieldsMap(t *testing.T) {
-	fieldsMap := map[string]string{
-		"id":    "uuid [primary]",
-		"email": "string [required, unique, email]",
-		"name":  "string [required, min:2, max:50]",
-	}
-
-	fields, err := ParseFieldsMap(fieldsMap)
-	if err != nil {
-		t.Fatalf("ParseFieldsMap() error = %v", err)
-	}
-
-	if len(fields) != 3 {
-		t.Errorf("got %d fields, want 3", len(fields))
-	}
-
-	if fields["id"].Type != "uuid" || !fields["id"].IsPrimary {
-		t.Errorf("invalid id field")
-	}
-
-	if fields["email"].Type != "string" || !fields["email"].IsRequired {
-		t.Errorf("invalid email field")
-	}
-}

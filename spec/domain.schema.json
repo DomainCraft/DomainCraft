@@ -43,6 +43,23 @@
       "title": "CacheConfig",
       "type": "object"
     },
+    "DeployConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "domain": {
+          "description": "API domain (e.g. localhost, api.example.com)",
+          "type": "string"
+        },
+        "port": {
+          "description": "Exposed application port (default: 8080)",
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "title": "DeployConfig",
+      "type": "object"
+    },
     "EntityDefinition": {
       "additionalProperties": false,
       "properties": {
@@ -173,6 +190,9 @@
         },
         "cors": {
           "$ref": "#/$defs/CORSConfig"
+        },
+        "deploy": {
+          "$ref": "#/$defs/DeployConfig"
         },
         "description": {
           "type": "string"

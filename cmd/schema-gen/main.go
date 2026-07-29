@@ -68,9 +68,12 @@ func buildSchema() map[string]any {
 					"cache": map[string]any{
 						"$ref": "#/$defs/CacheConfig",
 					},
-					"cors": map[string]any{
-						"$ref": "#/$defs/CORSConfig",
-					},
+				"cors": map[string]any{
+					"$ref": "#/$defs/CORSConfig",
+				},
+				"deploy": map[string]any{
+					"$ref": "#/$defs/DeployConfig",
+				},
 				},
 				"required": []string{"name"},
 			},
@@ -108,6 +111,15 @@ func buildSchema() map[string]any {
 					"mode":    map[string]any{"type": "string"},
 				},
 				"required": []string{"enabled"},
+			},
+			"DeployConfig": map[string]any{
+				"title":                "DeployConfig",
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"domain": map[string]any{"type": "string", "description": "API domain (e.g. localhost, api.example.com)"},
+					"port":   map[string]any{"type": "integer", "minimum": 1, "maximum": 65535, "description": "Exposed application port (default: 8080)"},
+				},
 			},
 			"EntityDefinition": map[string]any{
 				"title":                "EntityDefinition",

@@ -50,12 +50,6 @@ var MetaFieldTypes = []string{
 // Derived from PrimitiveFieldTypes + MetaFieldTypes so there is a single source of truth.
 var FieldTypes = append(append([]string{}, PrimitiveFieldTypes...), MetaFieldTypes...)
 
-// FeatureFieldNames returns the set of auto-generated feature field names.
-// Derived from FeatureFieldDefs so there is a single source of truth.
-func FeatureFieldNames() map[string]bool {
-	return featureFieldNames
-}
-
 // FeatureFieldDefs is the single source of truth for auto-injected feature fields.
 // Parser and renderer consume this map instead of hardcoding field definitions.
 var FeatureFieldDefs = map[string]FeatureFieldDef{
@@ -92,7 +86,6 @@ var numericSet map[string]bool
 var fieldTypeSet map[string]bool
 var onDeleteSet map[string]bool
 var featureSet map[string]bool
-var featureFieldNames map[string]bool
 
 func init() {
 	primitiveSet = SliceToSet(PrimitiveFieldTypes)
@@ -100,10 +93,6 @@ func init() {
 	fieldTypeSet = SliceToSet(FieldTypes)
 	onDeleteSet = SliceToSet(OnDeleteValues)
 	featureSet = SliceToSet(Features)
-	featureFieldNames = make(map[string]bool, len(FeatureFieldDefs))
-	for name := range FeatureFieldDefs {
-		featureFieldNames[name] = true
-	}
 }
 
 // IsPrimitive returns true if the type name is a built-in scalar (not an enum, array, or relation).

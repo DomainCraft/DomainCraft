@@ -21,6 +21,7 @@ type ProjectConfig struct {
 	MultiTenancy *MultiTenancyConfig `yaml:"multi_tenancy"`
 	Cache        *CacheConfig        `yaml:"cache"`
 	CORS         *CORSConfig         `yaml:"cors"`
+	Deploy       *DeployConfig       `yaml:"deploy"`
 }
 
 // AuthConfig describes authentication configuration.
@@ -47,6 +48,12 @@ func (e AuthEndpoints) HasRegister() bool { return e.Register == nil || *e.Regis
 // HasMe returns true if me endpoint is enabled (default: true).
 func (e AuthEndpoints) HasMe() bool { return e.Me == nil || *e.Me }
 
+// DeployConfig represents deployment configuration.
+type DeployConfig struct {
+	Domain string `yaml:"domain"` // API domain (e.g. "localhost", "api.example.com")
+	Port   int    `yaml:"port"`   // exposed port (default: 8080)
+}
+
 // CacheConfig represents cache configuration (agnostic — no language/platform specifics).
 type CacheConfig struct {
 	Enabled          bool   `yaml:"enabled"`
@@ -71,9 +78,64 @@ type MultiTenancyConfig struct {
 type RawEntity struct {
 	Features    []string                 `yaml:"features"`
 	Fields      map[string]string        `yaml:"fields"`
+	FieldOrder  []string                 // preserved from YAML — not a yaml tag
 	Indexes     []RawIndex               `yaml:"indexes"`
 	Permissions map[string]interface{}   `yaml:"permissions"`
 	Seed        []map[string]interface{} `yaml:"seed"`
+}
+
+// UnmarshalYAML preserves field order from the YAML mapping node.
+func (e *RawEntity) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.MappingNode {
+		// Fallback for non-mapping nodes
+		type rawEntityAlias RawEntity
+		return value.Decode((*rawEntityAlias)(e))
+	}
+
+	// Extract ordered keys and decode fields in order
+	for i := 0; i < len(value.Content)-1; i += 2 {
+		keyNode := value.Content[i]
+		valNode := value.Content[i+1]
+		key := keyNode.Value
+
+		switch key {
+		case "features":
+			if err := valNode.Decode(&e.Features); err != nil {
+				return err
+			}
+		case "fields":
+			e.Fields = make(map[string]string)
+			e.FieldOrder = make([]string, 0, len(valNode.Content)/2)
+			for j := 0; j < len(valNode.Content)-1; j += 2 {
+				fKey := valNode.Content[j].Value
+				var fVal string
+				if err := valNode.Content[j+1].Decode(&fVal); err != nil {
+					return err
+				}
+				e.Fields[fKey] = fVal
+				e.FieldOrder = append(e.FieldOrder, fKey)
+			}
+		case "indexes":
+			if err := valNode.Decode(&e.Indexes); err != nil {
+				return err
+			}
+		case "permissions":
+			if err := valNode.Decode(&e.Permissions); err != nil {
+				return err
+			}
+		case "seed":
+			if err := valNode.Decode(&e.Seed); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Ensure non-nil slices
+	if e.FieldOrder == nil {
+		e.FieldOrder = []string{}
+	}
+
+	return nil
 }
 
 // RawIndex represents an index definition

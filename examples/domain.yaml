@@ -2,6 +2,9 @@ project:
   name: ECommerce Platform
   description: Modern e-commerce system with advanced features
   version: 1.0.0
+  deploy:
+    domain: localhost
+    port: 8088
   multi_tenancy:
     enabled: true
     mode: column
@@ -224,7 +227,6 @@ entities:
 
     permissions:
       read: [Admin, "@Owner"]
-      read_public: "condition(isPublished == true)"
       create: [User, Admin]
       update: ["@Owner", Admin]
       delete: [Admin]

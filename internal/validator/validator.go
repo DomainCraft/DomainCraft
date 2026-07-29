@@ -49,10 +49,6 @@ var validCacheProviders = map[string]bool{
 	"redis": true, "memcached": true, "in-memory": true,
 }
 
-var validPermissionKeys = map[string]bool{
-	"read": true, "create": true, "update": true, "delete": true,
-}
-
 // stringValidationModifiers are only meaningful on string-type fields.
 var stringValidationModifiers = map[string]bool{
 	"min": true, "max": true, "email": true, "url": true, "ipv4": true, "regex": true,
@@ -506,8 +502,6 @@ func (v *Validator) validateIndex(entityName string, idxNum int, idx *parser.Par
 func (v *Validator) validatePermissions(entityName string, perms *parser.ParsedPermissions) []ValidationError {
 	var errs []ValidationError
 
-	// Check for unknown permission keys by looking at the raw data.
-	// We can't directly check, but we can validate role values.
 	validateRoles := func(operation string, roles []string) {
 		for _, role := range roles {
 			if role == "" {

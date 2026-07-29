@@ -13,6 +13,7 @@ type IRProject struct {
 	Entities []IREntity
 	Cache    *IRCacheConfig
 	CORS     *IRCORSConfig
+	Deploy   *IRDeployConfig
 }
 
 // IRAuthConfig represents authentication configuration in IR.
@@ -47,6 +48,12 @@ type IRCacheConfig struct {
 type IRCORSConfig struct {
 	Enabled bool
 	Origins []string
+}
+
+// IRDeployConfig represents deployment configuration in IR.
+type IRDeployConfig struct {
+	Domain string // API domain (e.g. "localhost", "api.example.com")
+	Port   int    // exposed port (default: 8080)
 }
 
 // IREntity represents an entity in IR.
@@ -163,9 +170,8 @@ type IRIndex struct {
 
 // IRPermissions represents entity permissions in IR.
 type IRPermissions struct {
-	Read       []string
-	Create     []string
-	Update     []string
-	Delete     []string
-	ReadPublic string
+	Read   []string
+	Create []string
+	Update []string
+	Delete []string
 }
