@@ -135,6 +135,13 @@
           },
           "type": "object"
         },
+        "fieldOrder": {
+          "description": "Ordered field names for display (GUI extension, not persisted in domain.yaml)",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "indexes": {
           "items": {
             "$ref": "#/$defs/IndexDefinition"

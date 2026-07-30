@@ -9,39 +9,39 @@ import (
 
 // RawSchema represents the root structure of domain.yaml
 type RawSchema struct {
-	Project  ProjectConfig        `yaml:"project"`
-	Database string               `yaml:"database"`
-	Auth     AuthConfig           `yaml:"auth"`
-	APIStyle string               `yaml:"api_style"`
-	Entities map[string]RawEntity `yaml:"entities"`
-	Enums    map[string][]string  `yaml:"enums"`
+	Project  ProjectConfig        `yaml:"project" json:"project"`
+	Database string               `yaml:"database" json:"database,omitempty"`
+	Auth     AuthConfig           `yaml:"auth" json:"auth"`
+	APIStyle string               `yaml:"api_style" json:"apiStyle"`
+	Entities map[string]RawEntity `yaml:"entities" json:"entities"`
+	Enums    map[string][]string  `yaml:"enums" json:"enums,omitempty"`
 }
 
 // ProjectConfig contains project-level information
 type ProjectConfig struct {
-	Name         string              `yaml:"name"`
-	Description  string              `yaml:"description"`
-	Version      string              `yaml:"version"`
-	Platform     string              `yaml:"platform"`
-	MultiTenancy *MultiTenancyConfig `yaml:"multi_tenancy"`
-	Cache        *CacheConfig        `yaml:"cache"`
-	CORS         *CORSConfig         `yaml:"cors"`
-	Deploy       *DeployConfig       `yaml:"deploy"`
+	Name         string              `yaml:"name" json:"name"`
+	Description  string              `yaml:"description" json:"description,omitempty"`
+	Version      string              `yaml:"version" json:"version,omitempty"`
+	Platform     string              `yaml:"platform" json:"platform,omitempty"`
+	MultiTenancy *MultiTenancyConfig `yaml:"multi_tenancy" json:"multi_tenancy,omitempty"`
+	Cache        *CacheConfig        `yaml:"cache" json:"cache,omitempty"`
+	CORS         *CORSConfig         `yaml:"cors" json:"cors,omitempty"`
+	Deploy       *DeployConfig       `yaml:"deploy" json:"deploy,omitempty"`
 }
 
 // AuthConfig describes authentication configuration.
 type AuthConfig struct {
-	Type      string        `yaml:"type"`      // jwt, none
-	Entity    string        `yaml:"entity"`    // optional, auto-detect if empty
-	Roles     []string      `yaml:"roles"`     // optional, for enum generation
-	Endpoints AuthEndpoints `yaml:"endpoints"` // optional, defaults to all true
+	Type      string        `yaml:"type" json:"type"`
+	Entity    string        `yaml:"entity" json:"entity,omitempty"`
+	Roles     []string      `yaml:"roles" json:"roles,omitempty"`
+	Endpoints AuthEndpoints `yaml:"endpoints" json:"endpoints"`
 }
 
 // AuthEndpoints controls which auth endpoints are generated.
 type AuthEndpoints struct {
-	Login    *bool `yaml:"login"`    // default: true
-	Register *bool `yaml:"register"` // default: true
-	Me       *bool `yaml:"me"`       // default: true
+	Login    *bool `yaml:"login" json:"login"`
+	Register *bool `yaml:"register" json:"register"`
+	Me       *bool `yaml:"me" json:"me"`
 }
 
 // HasLogin returns true if login endpoint is enabled (default: true).
@@ -55,46 +55,46 @@ func (e AuthEndpoints) HasMe() bool { return e.Me == nil || *e.Me }
 
 // DeployConfig represents deployment configuration.
 type DeployConfig struct {
-	Domain string `yaml:"domain"` // API domain (e.g. "localhost", "api.example.com")
-	Port   int    `yaml:"port"`   // exposed port (default: 8080)
+	Domain string `yaml:"domain" json:"domain,omitempty"`
+	Port   int    `yaml:"port" json:"port,omitempty"`
 }
 
 // CacheConfig represents cache configuration (agnostic — no language/platform specifics).
 type CacheConfig struct {
-	Enabled          bool   `yaml:"enabled"`
-	Provider         string `yaml:"provider"`
-	ConnectionString string `yaml:"connection_string"`
-	TTLSeconds       int    `yaml:"ttl_seconds"`
+	Enabled          bool   `yaml:"enabled" json:"enabled"`
+	Provider         string `yaml:"provider" json:"provider,omitempty"`
+	ConnectionString string `yaml:"connection_string" json:"connection_string,omitempty"`
+	TTLSeconds       int    `yaml:"ttl_seconds" json:"ttl_seconds,omitempty"`
 }
 
 // CORSConfig represents CORS configuration.
 type CORSConfig struct {
-	Enabled bool     `yaml:"enabled"`
-	Origins []string `yaml:"origins"`
+	Enabled bool     `yaml:"enabled" json:"enabled"`
+	Origins []string `yaml:"origins" json:"origins,omitempty"`
 }
 
 // MultiTenancyConfig holds multi-tenancy settings
 type MultiTenancyConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	Mode    string `yaml:"mode"` // column, schema, database
+	Enabled bool   `yaml:"enabled" json:"enabled"`
+	Mode    string `yaml:"mode" json:"mode,omitempty"`
 }
 
 // RawEntity represents an unprocessed entity from YAML
 type RawEntity struct {
-	Features    []string               `yaml:"features"`
-	Fields      map[string]string      `yaml:"fields"`
-	FieldOrder  []string               // preserved from YAML — not a yaml tag
-	Indexes     []RawIndex             `yaml:"indexes"`
-	Permissions *RawPermissions        `yaml:"permissions"`
-	Seed        []map[string]interface{} `yaml:"seed"`
+	Features    []string               `yaml:"features" json:"features,omitempty"`
+	Fields      map[string]string      `yaml:"fields" json:"fields"`
+	FieldOrder  []string               `yaml:"-" json:"fieldOrder"` // preserved from YAML — not a yaml tag
+	Indexes     []RawIndex             `yaml:"indexes" json:"indexes,omitempty"`
+	Permissions *RawPermissions        `yaml:"permissions" json:"permissions,omitempty"`
+	Seed        []map[string]interface{} `yaml:"seed" json:"seed,omitempty"`
 }
 
 // RawPermissions represents entity permissions before parsing.
 type RawPermissions struct {
-	Read   []string `yaml:"read"`
-	Create []string `yaml:"create"`
-	Update []string `yaml:"update"`
-	Delete []string `yaml:"delete"`
+	Read   []string `yaml:"read" json:"read,omitempty"`
+	Create []string `yaml:"create" json:"create,omitempty"`
+	Update []string `yaml:"update" json:"update,omitempty"`
+	Delete []string `yaml:"delete" json:"delete,omitempty"`
 }
 
 // UnmarshalYAML preserves field order from the YAML mapping node.
@@ -155,10 +155,10 @@ func (e *RawEntity) UnmarshalYAML(value *yaml.Node) error {
 
 // RawIndex represents an index definition
 type RawIndex struct {
-	Fields []string `yaml:"fields"`
-	Type   string   `yaml:"type"` // btree, hash, gist, gin, brin
-	Sort   []string `yaml:"sort"` // asc, desc
-	Unique bool     `yaml:"unique"`
+	Fields []string `yaml:"fields" json:"fields"`
+	Type   string   `yaml:"type" json:"type,omitempty"`
+	Sort   []string `yaml:"sort" json:"sort,omitempty"`
+	Unique bool     `yaml:"unique" json:"unique,omitempty"`
 }
 
 // ParseRawSchema reads YAML and converts it to RawSchema

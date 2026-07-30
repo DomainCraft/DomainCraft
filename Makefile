@@ -9,7 +9,7 @@ GO_TMP_DIR ?= $(CURDIR)/bin
 export GOCACHE := $(GO_CACHE_DIR)
 export GOTMPDIR := $(GO_TMP_DIR)
 
-.PHONY: help build install run test test-verbose test-coverage lint fmt clean install-deps cli-validate cli-generate cli-new cli-bridges regenerate-spec generate-gui-types
+.PHONY: help build install run test test-verbose test-coverage lint fmt clean install-deps cli-validate cli-generate cli-new cli-bridges regenerate-spec generate-gui-types build-wasm build-wasm-gui
 
 help:
 	@echo "DomainCraft CLI - Available Commands"
@@ -23,6 +23,8 @@ help:
 	@echo "  make cli-bridges     - List available bridges"
 	@echo "  make regenerate-spec - Regenerate spec/domain.schema.json and GUI TypeScript types"
 	@echo "  make generate-gui-types - Regenerate only GUI TypeScript types from schema"
+	@echo "  make build-wasm      - Build WASM validator binary (GOOS=js GOARCH=wasm)"
+	@echo "  make build-wasm-gui  - Build WASM and copy to DomainCraftGui/public/wasm/"
 	@echo "  make test            - Run all tests"
 	@echo "  make test-verbose    - Run tests with verbose output"
 	@echo "  make test-coverage   - Run tests and generate coverage report"
@@ -119,3 +121,30 @@ dev-watch:
 dev-test-watch:
 	@echo "Watching for changes and running tests..."
 	@find . -name "*.go" | entr -r make test-verbose
+
+# WASM targets
+WASM_OUTPUT ?= bin/validate.wasm
+WASM_GUI_DIR ?= ../DomainCraftGui/public/wasm
+
+ifeq ($(OS),Windows_NT)
+build-wasm:
+	@echo "Building WASM validator..."
+	@cmd /c "set GOOS=js&& set GOARCH=wasm&& go build -o $(WASM_OUTPUT) ./cmd/wasm-validator/"
+	@echo "Built $(WASM_OUTPUT)"
+build-wasm-gui: build-wasm
+	@echo "Copying WASM to GUI public directory..."
+	@if not exist "$(subst /,\,$(WASM_GUI_DIR))" mkdir "$(subst /,\,$(WASM_GUI_DIR))"
+	@copy "$(subst /,\,$(WASM_OUTPUT))" "$(subst /,\,$(WASM_GUI_DIR))\validate.wasm" >nul
+	@echo "Copied to $(WASM_GUI_DIR)/validate.wasm"
+else
+build-wasm:
+	@echo "Building WASM validator..."
+	@GOOS=js GOARCH=wasm go build -o $(WASM_OUTPUT) ./cmd/wasm-validator/
+	@echo "Built $(WASM_OUTPUT)"
+build-wasm-gui: build-wasm
+	@echo "Copying WASM to GUI public directory..."
+	@mkdir -p $(WASM_GUI_DIR)
+	@cp $(WASM_OUTPUT) $(WASM_GUI_DIR)/validate.wasm
+	@gzip -k -f -9 $(WASM_GUI_DIR)/validate.wasm
+	@echo "Copied to $(WASM_GUI_DIR)/validate.wasm (+ gzipped)"
+endif
