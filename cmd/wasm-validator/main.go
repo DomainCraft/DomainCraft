@@ -11,6 +11,8 @@ import (
 	"github.com/DomainCraft/DomainCraft/internal/validator"
 )
 
+var version = "dev" // set via -ldflags "-X main.version=v0.2.0"
+
 type validationError struct {
 	Entity  string `json:"entity,omitempty"`
 	Field   string `json:"field,omitempty"`
@@ -28,7 +30,12 @@ func main() {
 	js.Global().Set("goValidate", js.FuncOf(validate))
 	js.Global().Set("goParseField", js.FuncOf(parseField))
 	js.Global().Set("goParseDomain", js.FuncOf(parseDomain))
+	js.Global().Set("goVersion", js.FuncOf(versionFunc))
 	<-c
+}
+
+func versionFunc(_ js.Value, _ []js.Value) interface{} {
+	return version
 }
 
 func validate(_ js.Value, args []js.Value) interface{} {
