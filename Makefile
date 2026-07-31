@@ -125,7 +125,11 @@ dev-test-watch:
 # WASM targets
 WASM_OUTPUT ?= bin/validate.wasm
 WASM_GUI_DIR ?= ../DomainCraftGui/public/wasm
+ifeq ($(OS),Windows_NT)
+VERSION ?= $(shell git describe --tags --abbrev=0 2>nul || echo dev)
+else
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
+endif
 WASM_LDFLAGS := -X main.version=$(VERSION)
 
 ifeq ($(OS),Windows_NT)
