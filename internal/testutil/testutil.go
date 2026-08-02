@@ -2,7 +2,6 @@
 package testutil
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/DomainCraft/DomainCraft/internal/lexer"
@@ -21,11 +20,6 @@ func MustParsedField(t *testing.T, name, input string) *parser.ParsedField {
 	fieldDef.Name = name
 	return &parser.ParsedField{
 		FieldDefinition:    fieldDef,
-		DatabaseColumnName: toDatabaseColumnName(name),
+		DatabaseColumnName: textutil.ToDatabaseColumnName(name),
 	}
-}
-
-// toDatabaseColumnName converts a field name to snake_case for DatabaseColumnName.
-func toDatabaseColumnName(fieldName string) string {
-	return strings.ToLower(strings.Join(textutil.SplitIdentifier(fieldName), "_"))
 }

@@ -1,7 +1,9 @@
 package parser
 
 import (
+	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/DomainCraft/DomainCraft/internal/specmeta"
 	"gopkg.in/yaml.v3"
@@ -81,11 +83,11 @@ type MultiTenancyConfig struct {
 
 // RawEntity represents an unprocessed entity from YAML
 type RawEntity struct {
-	Features    []string               `yaml:"features" json:"features,omitempty"`
-	Fields      map[string]string      `yaml:"fields" json:"fields"`
-	FieldOrder  []string               `yaml:"-" json:"fieldOrder"` // preserved from YAML — not a yaml tag
-	Indexes     []RawIndex             `yaml:"indexes" json:"indexes,omitempty"`
-	Permissions *RawPermissions        `yaml:"permissions" json:"permissions,omitempty"`
+	Features    []string                 `yaml:"features" json:"features,omitempty"`
+	Fields      map[string]string        `yaml:"fields" json:"fields"`
+	FieldOrder  []string                 `yaml:"-" json:"fieldOrder"` // preserved from YAML — not a yaml tag
+	Indexes     []RawIndex               `yaml:"indexes" json:"indexes,omitempty"`
+	Permissions *RawPermissions          `yaml:"permissions" json:"permissions,omitempty"`
 	Seed        []map[string]interface{} `yaml:"seed" json:"seed,omitempty"`
 }
 
@@ -96,6 +98,23 @@ type RawPermissions struct {
 	Update []string `yaml:"update" json:"update,omitempty"`
 	Delete []string `yaml:"delete" json:"delete,omitempty"`
 }
+
+// UnmarshalYAML rejects unknown permission keys instead of silently ignoring them.
+func (p *RawPermissions) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.MappingNode {
+		return value.Decode((*rawPermissionsAlias)(p))
+	}
+	// Iterate keys explicitly so unknown permission keys become errors.
+	for i := 0; i < len(value.Content)-1; i += 2 {
+		key := value.Content[i].Value
+		if !specmeta.IsPermissionKey(key) {
+			return fmt.Errorf("unknown permission key %q; valid keys: %s", key, strings.Join(specmeta.PermissionKeys, ", "))
+		}
+	}
+	return value.Decode((*rawPermissionsAlias)(p))
+}
+
+type rawPermissionsAlias RawPermissions
 
 // UnmarshalYAML preserves field order from the YAML mapping node.
 func (e *RawEntity) UnmarshalYAML(value *yaml.Node) error {
@@ -136,13 +155,13 @@ func (e *RawEntity) UnmarshalYAML(value *yaml.Node) error {
 			if err := valNode.Decode(&e.Permissions); err != nil {
 				return err
 			}
-	case "seed":
-		if err := valNode.Decode(&e.Seed); err != nil {
-			return err
+		case "seed":
+			if err := valNode.Decode(&e.Seed); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unknown entity key %q; valid keys: features, fields, indexes, permissions, seed", key)
 		}
-	default:
-		return fmt.Errorf("unknown entity key %q; valid keys: features, fields, indexes, permissions, seed", key)
-	}
 	}
 
 	// Ensure non-nil slices
@@ -161,10 +180,29 @@ type RawIndex struct {
 	Unique bool     `yaml:"unique" json:"unique,omitempty"`
 }
 
+// UnmarshalYAML rejects unknown index keys instead of silently ignoring them.
+func (r *RawIndex) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.MappingNode {
+		return value.Decode((*rawIndexAlias)(r))
+	}
+	valid := specmeta.SliceToSet([]string{"fields", "type", "sort", "unique"})
+	for i := 0; i < len(value.Content)-1; i += 2 {
+		key := value.Content[i].Value
+		if !valid[key] {
+			return fmt.Errorf("unknown index key %q; valid keys: fields, type, sort, unique", key)
+		}
+	}
+	return value.Decode((*rawIndexAlias)(r))
+}
+
+type rawIndexAlias RawIndex
+
 // ParseRawSchema reads YAML and converts it to RawSchema
 func ParseRawSchema(data []byte) (*RawSchema, error) {
 	schema := &RawSchema{}
-	if err := yaml.Unmarshal(data, schema); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(schema); err != nil {
 		return nil, err
 	}
 

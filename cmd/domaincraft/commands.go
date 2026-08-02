@@ -276,7 +276,7 @@ func newGenerateCmd() *cobra.Command {
 			bridgePath = resolvedPath
 
 			log.Info("Building IR")
-			irProject, err := ir.NewBuilder().Build(schema)
+			irProject, err := ir.Build(schema)
 			if err != nil {
 				return err
 			}

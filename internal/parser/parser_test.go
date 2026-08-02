@@ -5,6 +5,85 @@ import (
 	"testing"
 )
 
+func TestParseStrictRejectsUnknownKeys(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{
+			name: "unknown root key",
+			yaml: `project:
+  name: Test
+database: postgresql
+unknown_root: value
+entities: {}
+`,
+			wantErr: "field unknown_root not found in type parser.RawSchema",
+		},
+		{
+			name: "unknown entity key",
+			yaml: `project:
+  name: Test
+entities:
+  User:
+    fields:
+      id: uuid [primary]
+    typo_key: value
+`,
+			wantErr: "unknown entity key",
+		},
+		{
+			name: "unknown permission key",
+			yaml: `project:
+  name: Test
+entities:
+  User:
+    fields:
+      id: uuid [primary]
+    permissions:
+      read: ["*"]
+      read_public: true
+`,
+			wantErr: "unknown permission key",
+		},
+		{
+			name: "unknown index key",
+			yaml: `project:
+  name: Test
+entities:
+  User:
+    fields:
+      id: uuid [primary]
+    indexes:
+      - fields: [email]
+        typo: true
+`,
+			wantErr: "unknown index key",
+		},
+		{
+			name: "unknown project key",
+			yaml: `project:
+  name: Test
+  typo_field: x
+entities: {}
+`,
+			wantErr: "field typo_field not found in type parser.ProjectConfig",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseRawSchema([]byte(tt.yaml))
+			if err == nil {
+				t.Fatalf("ParseRawSchema() expected error containing %q, got nil", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ParseRawSchema() error = %q, want it to contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestParseRawSchema(t *testing.T) {
 	yamlData := []byte(`
 project:
@@ -168,7 +247,7 @@ entities:
 	if categoryId.Type != "relation" {
 		t.Errorf("categoryId type should be relation")
 	}
-	if categoryId.RelationTarget != "Category" {
+	if categoryId.TargetEntity != "Category" {
 		t.Errorf("categoryId target should be Category")
 	}
 	if !categoryId.IsOptional {
@@ -180,7 +259,7 @@ entities:
 
 	// Check supplierId
 	supplierId := product.Fields["supplierId"]
-	if supplierId.RelationTarget != "User" {
+	if supplierId.TargetEntity != "User" {
 		t.Errorf("supplierId target should be User")
 	}
 	if supplierId.IsOptional {

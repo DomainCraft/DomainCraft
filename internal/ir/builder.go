@@ -10,14 +10,8 @@ import (
 	"github.com/DomainCraft/DomainCraft/pkg/textutil"
 )
 
-// Builder converts ParsedSchema into IRProject.
-type Builder struct{}
-
-func NewBuilder() *Builder {
-	return &Builder{}
-}
-
-func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
+// Build converts ParsedSchema into IRProject.
+func Build(schema *parser.ParsedSchema) (*IRProject, error) {
 	if schema == nil {
 		return nil, fmt.Errorf("parsed schema is nil")
 	}
@@ -79,18 +73,23 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 				continue
 			}
 
+			databaseType, err := resolveDatabaseType(field, schema)
+			if err != nil {
+				return nil, fmt.Errorf("field '%s.%s': %w", sourceEntity.Name, field.Name, err)
+			}
+
 			irEntity.Fields = append(irEntity.Fields, IRField{
 				Name:               field.Name,
-				DatabaseType:       resolveDatabaseType(field, schema),
+				DatabaseType:       databaseType,
 				DatabaseColumnName: field.DatabaseColumnName,
-				NavigationName:     navigationName(field),
+				NavigationName:     field.NavigationName(),
 				IsPrimary:          field.IsPrimary,
 				IsNullable:         field.IsOptional,
 				IsUnique:           field.IsUnique,
 				IsHidden:           field.IsHidden,
-				IsRelation:         field.IsRelation,
+				IsRelation:         field.IsRelation(),
 				IsMany:             field.IsMany,
-				RelationTarget:     field.RelationTarget,
+				RelationTarget:     field.TargetEntity,
 				DefaultValue:       field.DefaultValue,
 				DefaultIsFunc:      field.DefaultIsFunc,
 				Validations:        convertValidations(field.Validations),
@@ -120,19 +119,19 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 
 		for _, fieldName := range sourceEntity.FieldOrder {
 			field := sourceEntity.Fields[fieldName]
-			if field == nil || !field.IsRelation {
+			if field == nil || !field.IsRelation() {
 				continue
 			}
 
-			targetEntity, ok := entityIndex[field.RelationTarget]
+			targetEntity, ok := entityIndex[field.TargetEntity]
 			if !ok {
-				return nil, fmt.Errorf("relation target '%s' referenced by '%s.%s' does not exist", field.RelationTarget, irEntity.Name, field.Name)
+				return nil, fmt.Errorf("relation target '%s' referenced by '%s.%s' does not exist", field.TargetEntity, irEntity.Name, field.Name)
 			}
 
 			relation := IRRelation{
 				FieldName:        field.Name,
 				TargetEntity:     targetEntity,
-				NavigationName:   navigationName(field),
+				NavigationName:   field.NavigationName(),
 				InverseNavName:   textutil.Pluralize(irEntity.Name),
 				OnDeleteBehavior: field.OnDelete,
 				IsNullable:       field.IsOptional,
@@ -185,87 +184,104 @@ func (b *Builder) Build(schema *parser.ParsedSchema) (*IRProject, error) {
 		}
 	}
 
-	// Topological sort of entities by FK dependencies.
-	// Entities with no outgoing FK dependencies are placed first so that
-	// the seeder inserts rows in the correct order (parents before children).
-	{
-		// Build set of dependencies per entity: deps[A] = {B, C, ...} means A depends on B, C.
-		deps := make(map[string]map[string]bool, len(irProject.Entities))
-		for _, entity := range irProject.Entities {
-			depSet := make(map[string]bool)
-			for _, rel := range entity.RelationsOut {
-				if !rel.IsMany && rel.TargetEntity != nil && rel.TargetEntity.Name != entity.Name {
-					depSet[rel.TargetEntity.Name] = true
+	// Topologically sort entities by FK dependencies (parents before children),
+	// so the seeder inserts rows in the correct order.
+	sortEntities(irProject.Entities)
+
+	return irProject, nil
+}
+
+// sortEntities reorders the slice in place by FK dependencies using Kahn's algorithm.
+// The order is deterministic: ties are broken by entity name.
+func sortEntities(entities []IREntity) {
+	byName := make(map[string]int, len(entities))
+	for i, e := range entities {
+		byName[e.Name] = i
+	}
+
+	// deps[i] = set of entity names that entities[i] depends on (must come first).
+	deps := make([]map[string]bool, len(entities))
+	inDegree := make([]int, len(entities))
+	for i, entity := range entities {
+		depSet := make(map[string]bool)
+		for _, rel := range entity.RelationsOut {
+			if !rel.IsMany && rel.TargetEntity != nil && rel.TargetEntity.Name != entity.Name {
+				depSet[rel.TargetEntity.Name] = true
+			}
+		}
+		deps[i] = depSet
+		inDegree[i] = len(depSet)
+	}
+
+	// Initialize the queue with all entities that have no dependencies.
+	ready := make([]string, 0)
+	for i, e := range entities {
+		if inDegree[i] == 0 {
+			ready = append(ready, e.Name)
+		}
+	}
+	// Deterministic ordering: process ready entities in name order.
+	sort.Strings(ready)
+
+	order := make([]string, 0, len(entities))
+	for len(ready) > 0 {
+		name := ready[0]
+		ready = ready[1:]
+		order = append(order, name)
+
+		// For every entity depending on this one, decrement in-degree.
+		for i := range entities {
+			if deps[i][name] {
+				inDegree[i]--
+				if inDegree[i] == 0 {
+					// Insert in sorted order to keep processing deterministic.
+					ready = append(ready, entities[i].Name)
+					sort.Strings(ready)
 				}
 			}
-			deps[entity.Name] = depSet
-		}
-
-		// In-degree = number of dependencies (entities that must come before this one).
-		inDegree := make(map[string]int, len(irProject.Entities))
-		for _, entity := range irProject.Entities {
-			inDegree[entity.Name] = len(deps[entity.Name])
-		}
-
-		// Kahn's algorithm.
-		queue := make([]string, 0)
-		for _, entity := range irProject.Entities {
-			if inDegree[entity.Name] == 0 {
-				queue = append(queue, entity.Name)
-			}
-		}
-
-		sorted := make([]IREntity, 0, len(irProject.Entities))
-		entityByName := make(map[string]IREntity, len(irProject.Entities))
-		for _, e := range irProject.Entities {
-			entityByName[e.Name] = e
-		}
-
-		for len(queue) > 0 {
-			name := queue[0]
-			queue = queue[1:]
-			sorted = append(sorted, entityByName[name])
-
-			// For every entity that depends on the one we just processed,
-			// decrement its in-degree. When it reaches 0, enqueue it.
-			for _, entity := range irProject.Entities {
-				if deps[entity.Name][name] {
-					inDegree[entity.Name]--
-					if inDegree[entity.Name] == 0 {
-						queue = append(queue, entity.Name)
-					}
-				}
-			}
-		}
-
-		// If topological sort didn't include all entities (cycle), append the rest in original order.
-		if len(sorted) < len(irProject.Entities) {
-			sortedSet := make(map[string]bool, len(sorted))
-			for _, e := range sorted {
-				sortedSet[e.Name] = true
-			}
-			cycleNames := make([]string, 0)
-			for _, e := range irProject.Entities {
-				if !sortedSet[e.Name] {
-					sorted = append(sorted, e)
-					cycleNames = append(cycleNames, e.Name)
-				}
-			}
-			// Store cycle info so callers can warn users.
-			irProject.CircularDeps = cycleNames
-		}
-
-		irProject.Entities = sorted
-
-		// Rebuild entityIndex so it points to the sorted entities.
-		// The old entityIndex references were invalidated by the sort copies.
-		entityIndex = make(map[string]*IREntity, len(irProject.Entities))
-		for i := range irProject.Entities {
-			entityIndex[irProject.Entities[i].Name] = &irProject.Entities[i]
 		}
 	}
 
-	return irProject, nil
+	// Entities that form a cycle are appended in name order (after all others).
+	if len(order) < len(entities) {
+		inOrder := make(map[string]bool, len(order))
+		for _, name := range order {
+			inOrder[name] = true
+		}
+		remaining := make([]string, 0, len(entities)-len(order))
+		for _, e := range entities {
+			if !inOrder[e.Name] {
+				remaining = append(remaining, e.Name)
+			}
+		}
+		sort.Strings(remaining)
+		order = append(order, remaining...)
+	}
+
+	// Reorder in place. Relations hold *IREntity pointers, so after moving the
+	// values we must rebind every pointer to the element's new location.
+	sorted := make([]IREntity, 0, len(entities))
+	for _, name := range order {
+		sorted = append(sorted, entities[byName[name]])
+	}
+	copy(entities, sorted)
+
+	relocated := make(map[string]*IREntity, len(entities))
+	for i := range entities {
+		relocated[entities[i].Name] = &entities[i]
+	}
+	for i := range entities {
+		for j := range entities[i].RelationsOut {
+			if entities[i].RelationsOut[j].TargetEntity != nil {
+				entities[i].RelationsOut[j].TargetEntity = relocated[entities[i].RelationsOut[j].TargetEntity.Name]
+			}
+		}
+		for j := range entities[i].RelationsIn {
+			if entities[i].RelationsIn[j].TargetEntity != nil {
+				entities[i].RelationsIn[j].TargetEntity = relocated[entities[i].RelationsIn[j].TargetEntity.Name]
+			}
+		}
+	}
 }
 
 func convertValidations(source map[string]string) []IRValidation {
@@ -296,40 +312,42 @@ func convertPermissions(source *parser.ParsedPermissions) *IRPermissions {
 	}
 }
 
-func resolveDatabaseType(field *parser.ParsedField, schema *parser.ParsedSchema) string {
+func resolveDatabaseType(field *parser.ParsedField, schema *parser.ParsedSchema) (string, error) {
 	if field == nil || field.FieldDefinition == nil {
-		return specmeta.DefaultFieldType
+		return "", fmt.Errorf("field definition is missing")
 	}
 
-	if field.IsRelation {
-		if target, ok := schema.Entities[field.RelationTarget]; ok {
-			for _, targetFieldName := range target.FieldOrder {
-				targetField := target.Fields[targetFieldName]
-				if targetField != nil && targetField.IsPrimary {
-					return resolveDatabaseType(targetField, schema)
-				}
+	if field.IsRelation() {
+		target, ok := schema.Entities[field.TargetEntity]
+		if !ok {
+			return "", fmt.Errorf("relation target '%s' does not exist", field.TargetEntity)
+		}
+		for _, targetFieldName := range target.FieldOrder {
+			targetField := target.Fields[targetFieldName]
+			if targetField != nil && targetField.IsPrimary {
+				return resolveDatabaseType(targetField, schema)
 			}
 		}
-		return specmeta.DefaultFieldType
+		return "", fmt.Errorf("relation target '%s' has no primary key", field.TargetEntity)
 	}
 
 	if field.Type == "array" {
-		return resolveArrayType(field.TargetType)
+		return resolveArrayType(field.TargetType), nil
 	}
 
 	if field.Type == "enum" {
 		// Store the raw enum name as defined in YAML — templates decide how to render it
 		// (e.g. PascalCase for C#/Java, snake_case for Python, etc.)
 		if field.TargetType != "" {
-			return field.TargetType
+			return field.TargetType, nil
 		}
-		return specmeta.DefaultFieldType
+		return specmeta.DefaultFieldType, nil
 	}
 
 	if specmeta.IsPrimitive(field.Type) {
-		return field.Type
+		return field.Type, nil
 	}
-	return specmeta.DefaultFieldType
+	return specmeta.DefaultFieldType, nil
 }
 
 func resolveArrayType(targetType string) string {
@@ -342,27 +360,6 @@ func resolveArrayType(targetType string) string {
 		return "array(" + targetType + ")"
 	}
 	return "array(string)"
-}
-
-func navigationName(field *parser.ParsedField) string {
-	if field == nil {
-		return ""
-	}
-
-	name := field.Name
-	if field.IsMany {
-		name = textutil.Singularize(name)
-	}
-	// Strip "Id" or "ID" suffix (FK convention), not arbitrary "id" substrings.
-	if strings.HasSuffix(name, "Id") && len(name) > 2 {
-		name = name[:len(name)-2]
-	} else if strings.HasSuffix(name, "ID") && len(name) > 2 {
-		name = name[:len(name)-2]
-	}
-	if name == "" {
-		name = field.RelationTarget
-	}
-	return textutil.PascalCase(name)
 }
 
 func convertAuth(source *parser.AuthConfig, schema *parser.ParsedSchema) *IRAuthConfig {

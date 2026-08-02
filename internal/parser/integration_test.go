@@ -258,7 +258,7 @@ entities:
 	category := schema.Entities["Category"]
 	parentId := category.Fields["parentId"]
 
-	if parentId.Type != "relation" || parentId.RelationTarget != "Category" {
+	if parentId.Type != "relation" || parentId.TargetEntity != "Category" {
 		t.Errorf("parentId should be self-referential relation to Category")
 	}
 	if !parentId.IsOptional {

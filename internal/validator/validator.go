@@ -69,6 +69,8 @@ func (v *Validator) Validate() []ValidationError {
 		errs = append(errs, v.validateEntity(entityName, entity)...)
 	}
 
+	errs = append(errs, v.validateCircularRelations()...)
+
 	sort.SliceStable(errs, func(i, j int) bool {
 		if errs[i].Warning != errs[j].Warning {
 			return !errs[i].Warning // errors first
@@ -145,7 +147,97 @@ func (v *Validator) validateProject() []ValidationError {
 	return errs
 }
 
-// --- auth ---
+// validateCircularRelations detects cycles in the FK graph (entity A references
+// B which, directly or transitively, references A). Such cycles can produce
+// problematic delete orders and seed ordering in generated code.
+//
+// Only FK-bearing relations participate in the graph: self-referential links
+// (e.g. Category.parentId -> Category) are excluded because they are a normal
+// hierarchy pattern, and many-to-many links (which own no FK column) are excluded
+// because the FK physically lives on the other side.
+func (v *Validator) validateCircularRelations() []ValidationError {
+	var errs []ValidationError
+
+	// Build adjacency: entity -> list of target entities it references via an FK.
+	adj := make(map[string][]string)
+	for _, entityName := range v.schema.EntityOrder {
+		entity := v.schema.Entities[entityName]
+		if entity == nil {
+			continue
+		}
+		for _, fieldName := range entity.FieldOrder {
+			field := entity.Fields[fieldName]
+			if field == nil || !field.IsRelation() || field.TargetEntity == "" {
+				continue
+			}
+			// Skip many-to-many links (no FK on this side) and self-references.
+			if field.IsMany || field.TargetEntity == entityName {
+				continue
+			}
+			adj[entityName] = append(adj[entityName], field.TargetEntity)
+		}
+	}
+
+	// Standard DFS cycle detection (white/gray/black). All nodes on a gray stack
+	// when a back-edge is found are part of the cycle.
+	const (
+		white = iota
+		gray
+		black
+	)
+	color := make(map[string]int)
+	inCycle := make(map[string]bool)
+	stack := make([]string, 0, len(v.schema.EntityOrder))
+
+	var dfs func(node string)
+	dfs = func(node string) {
+		color[node] = gray
+		stack = append(stack, node)
+		for _, target := range adj[node] {
+			switch color[target] {
+			case white:
+				dfs(target)
+			case gray:
+				// Back-edge found: mark everything from target up the stack.
+				marking := false
+				for _, n := range stack {
+					if n == target {
+						marking = true
+					}
+					if marking {
+						inCycle[n] = true
+					}
+				}
+			case black:
+				// already fully explored
+			}
+		}
+		stack = stack[:len(stack)-1]
+		color[node] = black
+	}
+
+	for _, entityName := range v.schema.EntityOrder {
+		if color[entityName] == white {
+			dfs(entityName)
+		}
+	}
+
+	sorted := make([]string, 0, len(inCycle))
+	for name := range inCycle {
+		sorted = append(sorted, name)
+	}
+	sort.Strings(sorted)
+
+	for _, entityName := range sorted {
+		errs = append(errs, ValidationError{
+			Entity:  entityName,
+			Message: "entity is part of a circular relation chain (A → B → … → A); generated delete/seed ordering may be ambiguous",
+			Warning: true,
+		})
+	}
+
+	return errs
+}
 
 func (v *Validator) validateAuth() []ValidationError {
 	var errs []ValidationError
@@ -165,18 +257,7 @@ func (v *Validator) validateAuth() []ValidationError {
 		if !ok {
 			errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("auth.entity %q does not exist", auth.Entity)})
 		} else if !specmeta.HasEmailAndPassword(entity.FieldOrder) {
-			// Determine which fields are missing for a helpful message.
-			hasEmail := false
-			hasPassword := false
-			for _, fieldName := range entity.FieldOrder {
-				lower := strings.ToLower(fieldName)
-				if lower == "email" {
-					hasEmail = true
-				}
-				if lower == "password" {
-					hasPassword = true
-				}
-			}
+			hasEmail, hasPassword := specmeta.AuthFieldState(entity.FieldOrder)
 			errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("auth.entity %q must have both 'email' and 'password' fields (missing: %s)", auth.Entity, missingFields(!hasEmail, !hasPassword))})
 		}
 	} else {
@@ -213,7 +294,7 @@ func (v *Validator) validateAuth() []ValidationError {
 			entity.Permissions.Delete,
 		} {
 			for _, r := range roles {
-				if r == "*" || r == "" || strings.HasPrefix(r, "@") {
+				if specmeta.IsReservedPermissionToken(r) || r == "" {
 					continue
 				}
 				if len(auth.Roles) > 0 && !roleSet[r] {
@@ -321,12 +402,11 @@ func (v *Validator) validateEntity(entityName string, entity *parser.ParsedEntit
 	}
 
 	// Must have a primary key.
-	if countPrimaryKeys(entity) == 0 {
+	pkCount := countPrimaryKeys(entity)
+	if pkCount == 0 {
 		errs = append(errs, ValidationError{Entity: entityName, Message: "entity must have at least one primary key"})
-	}
-
-	// Must not have duplicate primary keys.
-	if pkCount := countPrimaryKeys(entity); pkCount > 1 {
+	} else if pkCount > 1 {
+		// Must not have duplicate primary keys.
 		errs = append(errs, ValidationError{Entity: entityName, Message: fmt.Sprintf("entity has %d primary keys; expected exactly one", pkCount)})
 	}
 
@@ -341,6 +421,9 @@ func (v *Validator) validateEntity(entityName string, entity *parser.ParsedEntit
 
 	// Track DB column names for collision detection.
 	columnNames := make(map[string]string) // column -> field name
+
+	// Track navigation names for collision detection.
+	navigationNames := make(map[string]string) // navigation name -> field name
 
 	for _, fieldName := range entity.FieldOrder {
 		field := entity.Fields[fieldName]
@@ -360,6 +443,20 @@ func (v *Validator) validateEntity(entityName string, entity *parser.ParsedEntit
 			})
 		}
 		columnNames[col] = fieldName
+
+		// Navigation name collision: two relation fields resolving to the same
+		// navigation property would produce duplicate properties in generated code.
+		if field.IsRelation() {
+			nav := field.NavigationName()
+			if prev, exists := navigationNames[nav]; exists {
+				errs = append(errs, ValidationError{
+					Entity:  entityName,
+					Field:   fieldName,
+					Message: fmt.Sprintf("navigation name '%s' collides with field '%s'", nav, prev),
+				})
+			}
+			navigationNames[nav] = fieldName
+		}
 	}
 
 	// Indexes.
@@ -436,7 +533,7 @@ func (v *Validator) validateField(entityName string, fieldName string, field *pa
 	// Note: on_delete value, set_null+optional, many+on_delete, and many+relation
 	// constraints are already enforced by the lexer. Only cross-entity and semantic
 	// checks that the lexer cannot perform belong here.
-	if field.IsRelation {
+	if field.IsRelation() {
 		if field.TargetEntity == "" {
 			errs = append(errs, ValidationError{Entity: entityName, Field: fieldName, Message: "relation field must specify a target entity"})
 		}
@@ -464,10 +561,6 @@ func (v *Validator) validateField(entityName string, fieldName string, field *pa
 	if field.IsPrimary {
 		if field.Type == "array" {
 			errs = append(errs, ValidationError{Entity: entityName, Field: fieldName, Message: "primary key cannot be an array type"})
-		}
-		if field.IsOptional {
-			// Already caught by lexer, but double-check.
-			errs = append(errs, ValidationError{Entity: entityName, Field: fieldName, Message: "primary key cannot be optional"})
 		}
 	}
 
@@ -500,8 +593,9 @@ func (v *Validator) validateField(entityName string, fieldName string, field *pa
 		if specmeta.IsNumericValidationModifier(mod) && !isNumeric {
 			errs = append(errs, ValidationError{Entity: entityName, Field: fieldName, Message: fmt.Sprintf("validation '%s' is only applicable to numeric fields, not %s", mod, ftype), Warning: true})
 		}
-		// Validate that numeric validation values are actually numeric.
-		if specmeta.IsNumericValidationModifier(mod) && val != "" {
+		// Validate that numeric validation values are actually numeric
+		// (numeric modifiers AND string min/max, which are also numeric).
+		if (specmeta.IsNumericValidationModifier(mod) || mod == "min" || mod == "max") && val != "" {
 			if _, err := strconv.ParseFloat(val, 64); err != nil {
 				errs = append(errs, ValidationError{Entity: entityName, Field: fieldName, Message: fmt.Sprintf("validation '%s' value %q is not a valid number", mod, val)})
 			}
@@ -547,6 +641,18 @@ func validateDefaultValue(entityName, fieldName, ftype, defaultVal string) []Val
 	case ftype == "boolean":
 		if !boolValues[defaultVal] {
 			errs = append(errs, ValidationError{Entity: entityName, Field: fieldName, Message: fmt.Sprintf("default value '%s' is not valid for boolean (expected true/false)", defaultVal), Warning: true})
+		}
+	case ftype == "date":
+		if !isValidDate(defaultVal) {
+			errs = append(errs, ValidationError{Entity: entityName, Field: fieldName, Message: fmt.Sprintf("default value '%s' is not a valid date (expected YYYY-MM-DD)", defaultVal), Warning: true})
+		}
+	case ftype == "datetime":
+		if !isValidDatetime(defaultVal) {
+			errs = append(errs, ValidationError{Entity: entityName, Field: fieldName, Message: fmt.Sprintf("default value '%s' is not a valid datetime (expected ISO 8601 format, e.g. 2024-01-15T10:30:00Z)", defaultVal), Warning: true})
+		}
+	case ftype == "uuid":
+		if !isValidUUID(defaultVal) {
+			errs = append(errs, ValidationError{Entity: entityName, Field: fieldName, Message: fmt.Sprintf("default value '%s' is not a valid UUID", defaultVal), Warning: true})
 		}
 	}
 	return errs
@@ -658,8 +764,8 @@ func (v *Validator) validateIndex(entityName string, idxNum int, idx *parser.Par
 
 		if _, ok := entity.Fields[f]; !ok {
 			errs = append(errs, ValidationError{Entity: entityName, Field: f, Message: fmt.Sprintf("index %d references unknown field '%s'", idxNum, f)})
-		} else if entity.Fields[f].IsRelation {
-			errs = append(errs, ValidationError{Entity: entityName, Field: f, Message: fmt.Sprintf("index %d references relation field '%s'; index the FK field instead", idxNum, f), Warning: true})
+		} else if entity.Fields[f].IsRelation() && !isFKFieldName(f) {
+			errs = append(errs, ValidationError{Entity: entityName, Field: f, Message: fmt.Sprintf("index %d references relation field '%s'; index the FK field instead (e.g. '%sId')", idxNum, f, f), Warning: true})
 		}
 	}
 
@@ -695,7 +801,7 @@ func (v *Validator) validatePermissions(entityName string, perms *parser.ParsedP
 				continue
 			}
 			// Skip special tokens: * (public) and @... (ownership tokens)
-			if role == "*" || strings.HasPrefix(role, "@") {
+			if specmeta.IsReservedPermissionToken(role) {
 				continue
 			}
 			if !validIdentifier.MatchString(role) {
@@ -740,7 +846,7 @@ func (v *Validator) validateSeedEntry(entityName string, entity *parser.ParsedEn
 	// Check required relation FK dependencies.
 	for _, fieldName := range entity.FieldOrder {
 		field := entity.Fields[fieldName]
-		if field == nil || !field.IsRelation || field.IsOptional || field.IsMany {
+		if field == nil || !field.IsRelation() || field.IsOptional || field.IsMany {
 			continue
 		}
 		if _, inSeed := entry[fieldName]; inSeed {
@@ -749,12 +855,12 @@ func (v *Validator) validateSeedEntry(entityName string, entity *parser.ParsedEn
 		if field.DefaultValue != "" {
 			continue
 		}
-		target := v.schema.Entities[field.RelationTarget]
+		target := v.schema.Entities[field.TargetEntity]
 		if target == nil || len(target.Seed) == 0 {
 			errs = append(errs, ValidationError{
 				Entity:  entityName,
 				Field:   fieldName,
-				Message: fmt.Sprintf("seed entry %d: required relation '%s' -> '%s' is not seeded (add FK value to seed or add seed data to %s)", entryIdx, fieldName, field.RelationTarget, field.RelationTarget),
+				Message: fmt.Sprintf("seed entry %d: required relation '%s' -> '%s' is not seeded (add FK value to seed or add seed data to %s)", entryIdx, fieldName, field.TargetEntity, field.TargetEntity),
 			})
 		}
 	}
@@ -768,6 +874,20 @@ func (v *Validator) validateSeedValueType(entityName, fieldName string, entryIdx
 	ftype := strings.ToLower(field.Type)
 
 	switch ftype {
+	case "string", "text":
+		// String-like fields accept strings or JSON string values; numbers/bools are
+		// accepted too (YAML coercion) but must not be a map/slice.
+		if _, isMap := seedValue.(map[string]interface{}); isMap {
+			errs = append(errs, ValidationError{
+				Entity: entityName, Field: fieldName,
+				Message: fmt.Sprintf("seed entry %d: value %v is not compatible with type %s", entryIdx, seedValue, ftype),
+			})
+		} else if _, isSlice := seedValue.([]interface{}); isSlice {
+			errs = append(errs, ValidationError{
+				Entity: entityName, Field: fieldName,
+				Message: fmt.Sprintf("seed entry %d: value %v is not compatible with type %s", entryIdx, seedValue, ftype),
+			})
+		}
 	case "int", "bigint":
 		switch seedValue.(type) {
 		case int, int32, int64, float32, float64:
@@ -810,6 +930,19 @@ func (v *Validator) validateSeedValueType(entityName, fieldName string, entryIdx
 				Message: fmt.Sprintf("seed entry %d: value %v is not compatible with boolean type", entryIdx, seedValue),
 			})
 		}
+	case "date":
+		s, ok := seedValue.(string)
+		if !ok {
+			errs = append(errs, ValidationError{
+				Entity: entityName, Field: fieldName,
+				Message: fmt.Sprintf("seed entry %d: value %v is not compatible with date type (expected string YYYY-MM-DD)", entryIdx, seedValue),
+			})
+		} else if !isValidDate(s) {
+			errs = append(errs, ValidationError{
+				Entity: entityName, Field: fieldName,
+				Message: fmt.Sprintf("seed entry %d: value %q is not a valid date (expected YYYY-MM-DD)", entryIdx, s),
+			})
+		}
 	case "uuid":
 		s, ok := seedValue.(string)
 		if !ok {
@@ -847,9 +980,83 @@ func (v *Validator) validateSeedValueType(entityName, fieldName string, entryIdx
 				})
 			}
 		}
+	case "enum":
+		// The value must be one of the declared enum values.
+		sv, ok := seedValue.(string)
+		if !ok {
+			errs = append(errs, ValidationError{
+				Entity: entityName, Field: fieldName,
+				Message: fmt.Sprintf("seed entry %d: value %v is not compatible with enum type (expected string)", entryIdx, seedValue),
+			})
+			break
+		}
+		if values, defined := v.schema.Enums[field.TargetType]; defined {
+			found := false
+			for _, val := range values {
+				if val == sv {
+					found = true
+					break
+				}
+			}
+			if !found {
+				errs = append(errs, ValidationError{
+					Entity: entityName, Field: fieldName,
+					Message: fmt.Sprintf("seed entry %d: value %q is not a declared value of enum '%s'; valid values: %s", entryIdx, sv, field.TargetType, strings.Join(values, ", ")),
+				})
+			}
+		}
+	case "array":
+		// Accept a YAML list. String values are accepted as JSON arrays.
+		switch v := seedValue.(type) {
+		case []interface{}:
+			// OK — list of elements
+		case []string:
+			// OK
+		case string:
+			if !isValidJSONArray(v) {
+				errs = append(errs, ValidationError{
+					Entity: entityName, Field: fieldName,
+					Message: fmt.Sprintf("seed entry %d: value %q is not a valid JSON array for array type", entryIdx, v),
+				})
+			}
+		default:
+			errs = append(errs, ValidationError{
+				Entity: entityName, Field: fieldName,
+				Message: fmt.Sprintf("seed entry %d: value %v is not compatible with array type (expected a list)", entryIdx, seedValue),
+			})
+		}
+	case "relation":
+		// FK values reference the target entity's PK. Accept scalar values
+		// (string/number/bool matching the target PK type); more precise
+		// cross-entity type checking is left to the seed FK dependency check.
+		switch seedValue.(type) {
+		case string, int, int32, int64, float32, float64, bool:
+			// OK
+		default:
+			errs = append(errs, ValidationError{
+				Entity: entityName, Field: fieldName,
+				Message: fmt.Sprintf("seed entry %d: value %v is not compatible with relation FK type", entryIdx, seedValue),
+			})
+		}
 	}
 
 	return errs
+}
+
+func isValidDate(s string) bool {
+	t, err := time.Parse("2006-01-02", s)
+	return err == nil && t.Year() >= 1970 && t.Year() <= 2100
+}
+
+func isValidJSONArray(s string) bool {
+	var arr []interface{}
+	return json.Unmarshal([]byte(s), &arr) == nil
+}
+
+// isFKFieldName reports whether a field name is already an FK-style name
+// (ends with "Id"/"id"), in which case indexing it maps to a real FK column.
+func isFKFieldName(name string) bool {
+	return strings.HasSuffix(name, "Id") || strings.HasSuffix(name, "id")
 }
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -894,4 +1101,3 @@ func countPrimaryKeys(entity *parser.ParsedEntity) int {
 	}
 	return count
 }
-

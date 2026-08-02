@@ -43,9 +43,34 @@ type ParsedField struct {
 	*lexer.FieldDefinition
 	// Additional info after full analysis
 	DatabaseColumnName string // generated from Name
-	IsRelation         bool
-	RelationTarget     string
 	RelationType       string // inferred by parser: many-to-one, one-to-one, many-to-many
+}
+
+// IsRelation reports whether the field is a relation field.
+func (f *ParsedField) IsRelation() bool { return f.Type == "relation" }
+
+// NavigationName returns the resolved navigation property name for the field.
+// For "categoryId" -> "Category", for a many relation "tags" -> "Tag".
+// Falls back to the relation target entity name when the field name has no
+// meaningful stem after stripping the Id suffix.
+func (f *ParsedField) NavigationName() string {
+	if f == nil || f.FieldDefinition == nil {
+		return ""
+	}
+	name := f.Name
+	if f.IsMany {
+		name = textutil.Singularize(name)
+	}
+	// Strip "Id" or "ID" suffix (FK convention), not arbitrary "id" substrings.
+	if strings.HasSuffix(name, "Id") && len(name) > 2 {
+		name = name[:len(name)-2]
+	} else if strings.HasSuffix(name, "ID") && len(name) > 2 {
+		name = name[:len(name)-2]
+	}
+	if name == "" {
+		name = f.TargetEntity
+	}
+	return textutil.PascalCase(name)
 }
 
 // ParsedIndex represents a parsed index
@@ -202,9 +227,7 @@ func (p *Parser) parseField(name string, fieldDef string) (*ParsedField, error) 
 
 	pf := &ParsedField{
 		FieldDefinition:    fd,
-		DatabaseColumnName: toDatabaseColumnName(name),
-		IsRelation:         fd.Type == "relation",
-		RelationTarget:     fd.TargetEntity,
+		DatabaseColumnName: textutil.ToDatabaseColumnName(name),
 		RelationType:       relType,
 	}
 
@@ -246,12 +269,6 @@ func newFeatureField(name string, def specmeta.FeatureFieldDef) *ParsedField {
 		FieldDefinition:    fd,
 		DatabaseColumnName: def.DBColumn,
 	}
-}
-
-// toDatabaseColumnName converts camelCase/PascalCase to snake_case.
-// Uses textutil.SplitIdentifier to correctly handle acronyms (e.g. "HTTPPort" -> "http_port").
-func toDatabaseColumnName(fieldName string) string {
-	return strings.ToLower(strings.Join(textutil.SplitIdentifier(fieldName), "_"))
 }
 
 // generateIndexName generates an index name from entity name and fields

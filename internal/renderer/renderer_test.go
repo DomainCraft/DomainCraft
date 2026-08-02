@@ -1,6 +1,8 @@
 package renderer
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -183,5 +185,23 @@ func TestRenderContext_PrimaryKey(t *testing.T) {
 	pk := ctx2.PrimaryKey()
 	if pk == nil || pk.Name != "id" {
 		t.Errorf("PrimaryKey() = %v, want field 'id'", pk)
+	}
+}
+
+func TestResolvePackagesNilLoggerDoesNotPanic(t *testing.T) {
+	// A nil logger is valid (silent mode). Failed package resolution must not
+	// panic when the logger is nil — Warn is a no-op on a nil Logger.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	r := &Renderer{log: nil, config: BridgeConfig{
+		RegistryURL:      server.URL + "/{id}/index.json",
+		RegistryPackages: map[string]string{"jwt_bearer": "Microsoft.AspNetCore.Authentication.JwtBearer"},
+	}}
+	got := r.resolvePackages()
+	if len(got) != 0 {
+		t.Fatalf("resolvePackages() = %v, want no resolved versions on failure", got)
 	}
 }

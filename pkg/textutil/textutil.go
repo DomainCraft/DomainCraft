@@ -79,6 +79,12 @@ func CamelCase(value string) string {
 	return strings.ToLower(value[:1]) + value[1:]
 }
 
+// ToDatabaseColumnName converts camelCase/PascalCase to snake_case.
+// Uses SplitIdentifier to correctly handle acronyms (e.g. "HTTPPort" -> "http_port").
+func ToDatabaseColumnName(fieldName string) string {
+	return strings.ToLower(strings.Join(SplitIdentifier(fieldName), "_"))
+}
+
 // SplitIdentifier splits a string into parts at underscores, hyphens, spaces,
 // and camelCase boundaries (e.g. "firstName" -> ["first", "Name"],
 // "HTMLParser" -> ["HTML", "Parser"]).

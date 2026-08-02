@@ -4,18 +4,17 @@ import "github.com/DomainCraft/DomainCraft/internal/specmeta"
 
 // IRProject represents the intermediate project model.
 type IRProject struct {
-	Name          string
-	Description   string
-	Database      string
-	Auth          *IRAuthConfig
-	APIStyle      string
-	Platform      string // target platform version (e.g. "net9.0"), passed through to templates
-	Enums         map[string][]string
-	Entities      []IREntity
-	Cache         *IRCacheConfig
-	CORS          *IRCORSConfig
-	Deploy        *IRDeployConfig
-	CircularDeps  []string // entity names involved in circular FK dependencies (empty if none)
+	Name        string
+	Description string
+	Database    string
+	Auth        *IRAuthConfig
+	APIStyle    string
+	Platform    string // target platform version (e.g. "net9.0"), passed through to templates
+	Enums       map[string][]string
+	Entities    []IREntity
+	Cache       *IRCacheConfig
+	CORS        *IRCORSConfig
+	Deploy      *IRDeployConfig
 }
 
 // IRAuthConfig represents authentication configuration in IR.

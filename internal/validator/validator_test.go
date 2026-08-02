@@ -79,8 +79,6 @@ func TestValidateDetectsBrokenRelation(t *testing.T) {
 	}
 	product := schema.Entities["Product"]
 	product.Fields["id"].IsPrimary = true
-	product.Fields["categoryId"].IsRelation = true
-	product.Fields["categoryId"].RelationTarget = "Category"
 
 	errs := New(schema).Validate()
 	errs = nonWarnings(errs)
@@ -115,8 +113,6 @@ func TestValidateDetectsSetNullOnRequiredField(t *testing.T) {
 	}
 	product := schema.Entities["Product"]
 	product.Fields["id"].IsPrimary = true
-	product.Fields["categoryId"].IsRelation = true
-	product.Fields["categoryId"].RelationTarget = "Category"
 	product.Fields["categoryId"].OnDelete = "set_null"
 	product.Fields["categoryId"].IsOptional = true
 
@@ -631,7 +627,46 @@ func TestValidateCacheConfigWarnings(t *testing.T) {
 	})
 }
 
-func TestValidateIndexOnRelationField(t *testing.T) {
+func TestValidateIndexOnRelationFieldWithoutIdSuffix(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		EntityOrder: []string{"Product", "Category"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Product": {
+				Name:       "Product",
+				FieldOrder: []string{"id", "category"},
+				Fields: map[string]*parser.ParsedField{
+					"id":       mustParsedField(t, "id", "uuid [primary]"),
+					"category": mustParsedField(t, "category", "relation(Category)"),
+				},
+				Indexes: []*parser.ParsedIndex{
+					{Fields: []string{"category"}, Type: "btree"},
+				},
+			},
+			"Category": {
+				Name:       "Category",
+				FieldOrder: []string{"id"},
+				Fields: map[string]*parser.ParsedField{
+					"id": mustParsedField(t, "id", "uuid [primary]"),
+				},
+			},
+		},
+	}
+	schema.Entities["Product"].Fields["id"].IsPrimary = true
+
+	errs := New(schema).Validate()
+	found := false
+	for _, e := range errs {
+		if e.Warning && strings.Contains(e.Message, "references relation field") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected warning about index on relation field without Id suffix, got %v", errs)
+	}
+}
+
+func TestValidateIndexOnFKFieldNoWarning(t *testing.T) {
 	schema := &parser.ParsedSchema{
 		Project:     parser.ProjectConfig{Name: "Test"},
 		EntityOrder: []string{"Product", "Category"},
@@ -657,18 +692,12 @@ func TestValidateIndexOnRelationField(t *testing.T) {
 		},
 	}
 	schema.Entities["Product"].Fields["id"].IsPrimary = true
-	schema.Entities["Product"].Fields["categoryId"].IsRelation = true
-	schema.Entities["Product"].Fields["categoryId"].RelationTarget = "Category"
 
 	errs := New(schema).Validate()
-	found := false
 	for _, e := range errs {
 		if e.Warning && strings.Contains(e.Message, "references relation field") {
-			found = true
+			t.Fatalf("unexpected warning for FK-style relation field in index: %v", e.Message)
 		}
-	}
-	if !found {
-		t.Fatalf("expected warning about index on relation field, got %v", errs)
 	}
 }
 
@@ -1203,9 +1232,6 @@ func TestValidateOnDeleteOnManyToManyWarning(t *testing.T) {
 		},
 	}
 	schema.Entities["Product"].Fields["id"].IsPrimary = true
-	schema.Entities["Product"].Fields["tags"].IsRelation = true
-	schema.Entities["Product"].Fields["tags"].RelationTarget = "Tag"
-	schema.Entities["Product"].Fields["tags"].IsMany = true
 	schema.Entities["Product"].Fields["tags"].OnDelete = "cascade"
 
 	errs := New(schema).Validate()
@@ -1243,8 +1269,6 @@ func TestValidateOnDeleteOnManyToManyNoWarningWithoutOnDelete(t *testing.T) {
 		},
 	}
 	schema.Entities["Product"].Fields["id"].IsPrimary = true
-	schema.Entities["Product"].Fields["tags"].IsRelation = true
-	schema.Entities["Product"].Fields["tags"].RelationTarget = "Tag"
 	schema.Entities["Product"].Fields["tags"].IsMany = true
 
 	errs := New(schema).Validate()
@@ -1559,5 +1583,414 @@ func TestValidatePermissionRoleSpecialTokensAllowed(t *testing.T) {
 		if e.Warning && strings.Contains(e.Message, "not a valid identifier") {
 			t.Fatalf("unexpected warning about special token in permissions: %v", e.Message)
 		}
+	}
+}
+
+func TestValidateSeedDateTypeMismatch(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		EntityOrder: []string{"Event"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Event": {
+				Name:       "Event",
+				FieldOrder: []string{"id", "started_on"},
+				Fields: map[string]*parser.ParsedField{
+					"id":         mustParsedField(t, "id", "uuid [primary]"),
+					"started_on": mustParsedField(t, "started_on", "date"),
+				},
+				Seed: []map[string]interface{}{
+					{"id": "550e8400-e29b-41d4-a716-446655440000", "started_on": "not-a-date"},
+				},
+			},
+		},
+	}
+	schema.Entities["Event"].Fields["id"].IsPrimary = true
+
+	errs := New(schema).Validate()
+	errs = nonWarnings(errs)
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e.Message, "seed entry") && strings.Contains(e.Message, "not a valid date") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected error about seed date type mismatch, got %v", errs)
+	}
+}
+
+func TestValidateSeedDateValid(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		EntityOrder: []string{"Event"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Event": {
+				Name:       "Event",
+				FieldOrder: []string{"id", "started_on"},
+				Fields: map[string]*parser.ParsedField{
+					"id":         mustParsedField(t, "id", "uuid [primary]"),
+					"started_on": mustParsedField(t, "started_on", "date"),
+				},
+				Seed: []map[string]interface{}{
+					{"id": "550e8400-e29b-41d4-a716-446655440000", "started_on": "2024-05-01"},
+				},
+			},
+		},
+	}
+	schema.Entities["Event"].Fields["id"].IsPrimary = true
+
+	errs := New(schema).Validate()
+	errs = nonWarnings(errs)
+	for _, e := range errs {
+		if strings.Contains(e.Message, "seed entry") && strings.Contains(e.Message, "not a valid date") {
+			t.Fatalf("unexpected seed date error: %v", e.Message)
+		}
+	}
+}
+
+func TestValidateSeedEnumInvalidValue(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project: parser.ProjectConfig{Name: "Test"},
+		Enums: map[string][]string{
+			"Status": {"ACTIVE", "INACTIVE"},
+		},
+		EntityOrder: []string{"Product"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Product": {
+				Name:       "Product",
+				FieldOrder: []string{"id", "status"},
+				Fields: map[string]*parser.ParsedField{
+					"id":     mustParsedField(t, "id", "uuid [primary]"),
+					"status": mustParsedField(t, "status", "enum(Status)"),
+				},
+				Seed: []map[string]interface{}{
+					{"id": "550e8400-e29b-41d4-a716-446655440000", "status": "BOGUS"},
+				},
+			},
+		},
+	}
+	schema.Entities["Product"].Fields["id"].IsPrimary = true
+
+	errs := New(schema).Validate()
+	errs = nonWarnings(errs)
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e.Message, "seed entry") && strings.Contains(e.Message, "not a declared value of enum") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected error about invalid enum seed value, got %v", errs)
+	}
+}
+
+func TestValidateSeedEnumValidValue(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project: parser.ProjectConfig{Name: "Test"},
+		Enums: map[string][]string{
+			"Status": {"ACTIVE", "INACTIVE"},
+		},
+		EntityOrder: []string{"Product"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Product": {
+				Name:       "Product",
+				FieldOrder: []string{"id", "status"},
+				Fields: map[string]*parser.ParsedField{
+					"id":     mustParsedField(t, "id", "uuid [primary]"),
+					"status": mustParsedField(t, "status", "enum(Status)"),
+				},
+				Seed: []map[string]interface{}{
+					{"id": "550e8400-e29b-41d4-a716-446655440000", "status": "ACTIVE"},
+				},
+			},
+		},
+	}
+	schema.Entities["Product"].Fields["id"].IsPrimary = true
+
+	errs := New(schema).Validate()
+	errs = nonWarnings(errs)
+	for _, e := range errs {
+		if strings.Contains(e.Message, "seed entry") && strings.Contains(e.Message, "enum") {
+			t.Fatalf("unexpected enum seed error: %v", e.Message)
+		}
+	}
+}
+
+func TestValidateSeedArrayInvalidValue(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		EntityOrder: []string{"Item"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Item": {
+				Name:       "Item",
+				FieldOrder: []string{"id", "tags"},
+				Fields: map[string]*parser.ParsedField{
+					"id":   mustParsedField(t, "id", "uuid [primary]"),
+					"tags": mustParsedField(t, "tags", "array(string)"),
+				},
+				Seed: []map[string]interface{}{
+					{"id": "550e8400-e29b-41d4-a716-446655440000", "tags": "not-json"},
+				},
+			},
+		},
+	}
+	schema.Entities["Item"].Fields["id"].IsPrimary = true
+
+	errs := New(schema).Validate()
+	errs = nonWarnings(errs)
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e.Message, "seed entry") && strings.Contains(e.Message, "not a valid JSON array") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected error about invalid array seed value, got %v", errs)
+	}
+}
+
+func TestValidateSeedArrayValidValue(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		EntityOrder: []string{"Item"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Item": {
+				Name:       "Item",
+				FieldOrder: []string{"id", "tags"},
+				Fields: map[string]*parser.ParsedField{
+					"id":   mustParsedField(t, "id", "uuid [primary]"),
+					"tags": mustParsedField(t, "tags", "array(string)"),
+				},
+				Seed: []map[string]interface{}{
+					{"id": "550e8400-e29b-41d4-a716-446655440000", "tags": []interface{}{"a", "b"}},
+				},
+			},
+		},
+	}
+	schema.Entities["Item"].Fields["id"].IsPrimary = true
+
+	errs := New(schema).Validate()
+	errs = nonWarnings(errs)
+	for _, e := range errs {
+		if strings.Contains(e.Message, "seed entry") && strings.Contains(e.Message, "array") {
+			t.Fatalf("unexpected array seed error: %v", e.Message)
+		}
+	}
+}
+
+func TestValidateStringMinMaxNonNumeric(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		EntityOrder: []string{"User"},
+		Entities: map[string]*parser.ParsedEntity{
+			"User": {
+				Name:       "User",
+				FieldOrder: []string{"id", "name"},
+				Fields: map[string]*parser.ParsedField{
+					"id":   mustParsedField(t, "id", "uuid [primary]"),
+					"name": mustParsedField(t, "name", "string [max:abc]"),
+				},
+			},
+		},
+	}
+	schema.Entities["User"].Fields["id"].IsPrimary = true
+
+	errs := New(schema).Validate()
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e.Message, "'max' value \"abc\" is not a valid number") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected error about non-numeric string min/max, got %v", errs)
+	}
+}
+
+func TestValidateCircularRelationWarning(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		EntityOrder: []string{"User", "Team"},
+		Entities: map[string]*parser.ParsedEntity{
+			"User": {
+				Name:       "User",
+				FieldOrder: []string{"id", "team"},
+				Fields: map[string]*parser.ParsedField{
+					"id":   mustParsedField(t, "id", "uuid [primary]"),
+					"team": mustParsedField(t, "team", "relation(Team)"),
+				},
+			},
+			"Team": {
+				Name:       "Team",
+				FieldOrder: []string{"id", "lead"},
+				Fields: map[string]*parser.ParsedField{
+					"id":   mustParsedField(t, "id", "uuid [primary]"),
+					"lead": mustParsedField(t, "lead", "relation(User)"),
+				},
+			},
+		},
+	}
+	schema.Entities["User"].Fields["id"].IsPrimary = true
+	schema.Entities["Team"].Fields["id"].IsPrimary = true
+
+	errs := New(schema).Validate()
+	found := false
+	for _, e := range errs {
+		if e.Warning && strings.Contains(e.Message, "circular relation") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected warning about circular relations, got %v", errs)
+	}
+}
+
+func TestValidateNoCircularRelationWarningForAcyclic(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		EntityOrder: []string{"User", "Team"},
+		Entities: map[string]*parser.ParsedEntity{
+			"User": {
+				Name:       "User",
+				FieldOrder: []string{"id", "team"},
+				Fields: map[string]*parser.ParsedField{
+					"id":   mustParsedField(t, "id", "uuid [primary]"),
+					"team": mustParsedField(t, "team", "relation(Team)"),
+				},
+			},
+			"Team": {
+				Name:       "Team",
+				FieldOrder: []string{"id"},
+				Fields: map[string]*parser.ParsedField{
+					"id": mustParsedField(t, "id", "uuid [primary]"),
+				},
+			},
+		},
+	}
+	schema.Entities["User"].Fields["id"].IsPrimary = true
+	schema.Entities["Team"].Fields["id"].IsPrimary = true
+
+	errs := New(schema).Validate()
+	for _, e := range errs {
+		if e.Warning && strings.Contains(e.Message, "circular relation") {
+			t.Fatalf("unexpected circular relation warning for acyclic schema: %v", e.Message)
+		}
+	}
+}
+
+func TestValidateNoCircularRelationWarningForSelfReference(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		EntityOrder: []string{"Category"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Category": {
+				Name:       "Category",
+				FieldOrder: []string{"id", "parentId"},
+				Fields: map[string]*parser.ParsedField{
+					"id":       mustParsedField(t, "id", "uuid [primary]"),
+					"parentId": mustParsedField(t, "parentId", "relation(Category) [optional]"),
+				},
+			},
+		},
+	}
+	schema.Entities["Category"].Fields["id"].IsPrimary = true
+
+	errs := New(schema).Validate()
+	for _, e := range errs {
+		if e.Warning && strings.Contains(e.Message, "circular relation") {
+			t.Fatalf("unexpected circular relation warning for self-referential hierarchy: %v", e.Message)
+		}
+	}
+}
+
+func TestValidateNoCircularRelationWarningForManyToMany(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		EntityOrder: []string{"Order", "OrderItem"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Order": {
+				Name:       "Order",
+				FieldOrder: []string{"id", "items"},
+				Fields: map[string]*parser.ParsedField{
+					"id":    mustParsedField(t, "id", "uuid [primary]"),
+					"items": mustParsedField(t, "items", "relation(OrderItem) [many]"),
+				},
+			},
+			"OrderItem": {
+				Name:       "OrderItem",
+				FieldOrder: []string{"id", "orderId"},
+				Fields: map[string]*parser.ParsedField{
+					"id":      mustParsedField(t, "id", "uuid [primary]"),
+					"orderId": mustParsedField(t, "orderId", "relation(Order)"),
+				},
+			},
+		},
+	}
+	schema.Entities["Order"].Fields["id"].IsPrimary = true
+	schema.Entities["OrderItem"].Fields["id"].IsPrimary = true
+
+	errs := New(schema).Validate()
+	for _, e := range errs {
+		if e.Warning && strings.Contains(e.Message, "circular relation") {
+			t.Fatalf("unexpected circular relation warning for parent/child many relation: %v", e.Message)
+		}
+	}
+}
+
+func TestValidateDefaultDateInvalid(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		EntityOrder: []string{"Event"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Event": {
+				Name:       "Event",
+				FieldOrder: []string{"id", "started_on"},
+				Fields: map[string]*parser.ParsedField{
+					"id":         mustParsedField(t, "id", "uuid [primary]"),
+					"started_on": mustParsedField(t, "started_on", "date [default:not-a-date]"),
+				},
+			},
+		},
+	}
+	schema.Entities["Event"].Fields["id"].IsPrimary = true
+
+	errs := New(schema).Validate()
+	found := false
+	for _, e := range errs {
+		if e.Warning && strings.Contains(e.Message, "not a valid date") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected warning about invalid date default, got %v", errs)
+	}
+}
+
+func TestValidateDefaultUuidInvalid(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		EntityOrder: []string{"Doc"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Doc": {
+				Name:       "Doc",
+				FieldOrder: []string{"id", "external_id"},
+				Fields: map[string]*parser.ParsedField{
+					"id":          mustParsedField(t, "id", "uuid [primary]"),
+					"external_id": mustParsedField(t, "external_id", "uuid [default:not-a-uuid]"),
+				},
+			},
+		},
+	}
+	schema.Entities["Doc"].Fields["id"].IsPrimary = true
+
+	errs := New(schema).Validate()
+	found := false
+	for _, e := range errs {
+		if e.Warning && strings.Contains(e.Message, "not a valid UUID") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected warning about invalid uuid default, got %v", errs)
 	}
 }

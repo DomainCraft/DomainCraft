@@ -4,12 +4,12 @@ import "strings"
 
 // FeatureFieldDef describes a field auto-injected by a feature macro.
 type FeatureFieldDef struct {
-	Feature      string `json:"feature"`
-	Type         string `json:"type"`
-	DBColumn     string `json:"dbColumn"`
-	IsOptional   bool   `json:"isOptional"`
-	IsFuncDefault bool  `json:"isFuncDefault"`
-	DefaultValue string `json:"defaultValue"`
+	Feature       string `json:"feature"`
+	Type          string `json:"type"`
+	DBColumn      string `json:"dbColumn"`
+	IsOptional    bool   `json:"isOptional"`
+	IsFuncDefault bool   `json:"isFuncDefault"`
+	DefaultValue  string `json:"defaultValue"`
 }
 
 var Databases = []string{"postgresql", "mysql", "sqlite", "mssql", "mongodb"}
@@ -68,23 +68,23 @@ var FuncDefaults = map[string][]string{
 const DefaultFieldType = "string"
 
 var (
-	primitiveSet           map[string]bool
-	numericSet             map[string]bool
-	stringSet              map[string]bool
-	booleanSet             map[string]bool
-	fieldTypeSet           map[string]bool
-	onDeleteSet            map[string]bool
-	featureSet             map[string]bool
-	indexTypeSet           map[string]bool
-	cacheProviderSet       map[string]bool
-	multiTenancyModeSet    map[string]bool
-	permissionKeySet       map[string]bool
-	stringValidationModSet map[string]bool
+	primitiveSet            map[string]bool
+	numericSet              map[string]bool
+	stringSet               map[string]bool
+	booleanSet              map[string]bool
+	fieldTypeSet            map[string]bool
+	onDeleteSet             map[string]bool
+	featureSet              map[string]bool
+	indexTypeSet            map[string]bool
+	cacheProviderSet        map[string]bool
+	multiTenancyModeSet     map[string]bool
+	permissionKeySet        map[string]bool
+	stringValidationModSet  map[string]bool
 	numericValidationModSet map[string]bool
-	sortDirectionSet       map[string]bool
-	databaseSet            map[string]bool
-	apiStyleSet            map[string]bool
-	authTypeSet            map[string]bool
+	sortDirectionSet        map[string]bool
+	databaseSet             map[string]bool
+	apiStyleSet             map[string]bool
+	authTypeSet             map[string]bool
 )
 
 func init() {
@@ -154,18 +154,22 @@ func FindAuthEntity(entityOrder []string, entityFields map[string][]string) stri
 }
 
 func HasEmailAndPassword(fieldNames []string) bool {
-	hasEmail := false
-	hasPassword := false
+	hasEmail, hasPassword := AuthFieldState(fieldNames)
+	return hasEmail && hasPassword
+}
+
+// AuthFieldState reports whether the field list contains "email" and "password"
+// (case-insensitive). Used to build helpful messages and to auto-detect auth entities.
+func AuthFieldState(fieldNames []string) (hasEmail, hasPassword bool) {
 	for _, f := range fieldNames {
-		lower := strings.ToLower(f)
-		if lower == "email" {
+		switch strings.ToLower(f) {
+		case "email":
 			hasEmail = true
-		}
-		if lower == "password" {
+		case "password":
 			hasPassword = true
 		}
 	}
-	return hasEmail && hasPassword
+	return hasEmail, hasPassword
 }
 
 func BuildEntityFields(entityOrder []string, getFields func(name string) []string) map[string][]string {
@@ -174,4 +178,16 @@ func BuildEntityFields(entityOrder []string, getFields func(name string) []strin
 		result[name] = getFields(name)
 	}
 	return result
+}
+
+// IsPublicPermission reports whether the role is the "*" wildcard (public access).
+func IsPublicPermission(role string) bool { return role == "*" }
+
+// IsOwnershipToken reports whether the role is an "@..." ownership token (e.g. "@Owner").
+func IsOwnershipToken(role string) bool { return strings.HasPrefix(role, "@") }
+
+// IsReservedPermissionToken reports whether the role is a special token
+// ("*" public wildcard or "@..." ownership token) that is not a declared role.
+func IsReservedPermissionToken(role string) bool {
+	return IsPublicPermission(role) || IsOwnershipToken(role)
 }

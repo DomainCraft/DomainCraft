@@ -33,10 +33,9 @@ func TestBuildCreatesRelations(t *testing.T) {
 			},
 		},
 	}
-	schema.Entities["Product"].Fields["categoryId"].IsRelation = true
-	schema.Entities["Product"].Fields["categoryId"].RelationTarget = "Category"
+	schema.Entities["Product"].Fields["id"].IsPrimary = true
 
-	projectIR, err := NewBuilder().Build(schema)
+	projectIR, err := Build(schema)
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
@@ -86,7 +85,7 @@ func TestBuildResolvesEnumTypes(t *testing.T) {
 	}
 	schema.Entities["Product"].Fields["id"].IsPrimary = true
 
-	projectIR, err := NewBuilder().Build(schema)
+	projectIR, err := Build(schema)
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
@@ -135,7 +134,7 @@ func TestBuildResolvesPrimitiveTypes(t *testing.T) {
 	}
 	schema.Entities["User"].Fields["id"].IsPrimary = true
 
-	projectIR, err := NewBuilder().Build(schema)
+	projectIR, err := Build(schema)
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
@@ -171,9 +170,9 @@ func mustParsedField(t *testing.T, name, input string) *parser.ParsedField {
 
 func TestNavigationNameStripsIdSuffix(t *testing.T) {
 	tests := []struct {
-		name     string
-		field    *parser.ParsedField
-		wantNav  string
+		name    string
+		field   *parser.ParsedField
+		wantNav string
 	}{
 		{
 			name:    "categoryId",
@@ -208,9 +207,9 @@ func TestNavigationNameStripsIdSuffix(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := navigationName(tt.field)
+			got := tt.field.NavigationName()
 			if got != tt.wantNav {
-				t.Errorf("navigationName() = %q, want %q", got, tt.wantNav)
+				t.Errorf("NavigationName() = %q, want %q", got, tt.wantNav)
 			}
 		})
 	}
@@ -234,7 +233,7 @@ func TestBuildCopiesDescription(t *testing.T) {
 	}
 	schema.Entities["User"].Fields["id"].IsPrimary = true
 
-	projectIR, err := NewBuilder().Build(schema)
+	projectIR, err := Build(schema)
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
@@ -262,7 +261,7 @@ func TestBuildCopiesFeaturesMap(t *testing.T) {
 	}
 	schema.Entities["User"].Fields["id"].IsPrimary = true
 
-	projectIR, err := NewBuilder().Build(schema)
+	projectIR, err := Build(schema)
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
@@ -301,7 +300,7 @@ func TestBuildCircularDependency(t *testing.T) {
 				NamePlural: "As",
 				FieldOrder: []string{"id", "bRef"},
 				Fields: map[string]*parser.ParsedField{
-					"id":    mustParsedField(t, "id", "uuid [primary]"),
+					"id":   mustParsedField(t, "id", "uuid [primary]"),
 					"bRef": mustParsedField(t, "bRef", "relation(B)"),
 				},
 			},
@@ -310,23 +309,21 @@ func TestBuildCircularDependency(t *testing.T) {
 				NamePlural: "Bs",
 				FieldOrder: []string{"id", "aRef"},
 				Fields: map[string]*parser.ParsedField{
-					"id":    mustParsedField(t, "id", "uuid [primary]"),
+					"id":   mustParsedField(t, "id", "uuid [primary]"),
 					"aRef": mustParsedField(t, "aRef", "relation(A)"),
 				},
 			},
 		},
 	}
-	schema.Entities["A"].Fields["bRef"].IsRelation = true
-	schema.Entities["A"].Fields["bRef"].RelationTarget = "B"
-	schema.Entities["B"].Fields["aRef"].IsRelation = true
-	schema.Entities["B"].Fields["aRef"].RelationTarget = "A"
+	schema.Entities["A"].Fields["id"].IsPrimary = true
+	schema.Entities["B"].Fields["id"].IsPrimary = true
 
-	projectIR, err := NewBuilder().Build(schema)
+	projectIR, err := Build(schema)
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
-	if len(projectIR.CircularDeps) == 0 {
-		t.Fatal("expected circular dependency info, got none")
+	if len(projectIR.Entities) != 2 {
+		t.Fatalf("got %d entities, want 2", len(projectIR.Entities))
 	}
 }
 
@@ -350,7 +347,7 @@ func TestBuildCopiesDatabaseColumnName(t *testing.T) {
 	schema.Entities["User"].Fields["id"].IsPrimary = true
 	schema.Entities["User"].Fields["firstName"].DatabaseColumnName = "first_name"
 
-	projectIR, err := NewBuilder().Build(schema)
+	projectIR, err := Build(schema)
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
