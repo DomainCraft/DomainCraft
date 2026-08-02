@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/DomainCraft/DomainCraft/internal/bridge"
@@ -583,6 +584,16 @@ func handleRename(ren snapshot.Rename, fresh map[string]bool, log *logger.Logger
 			continue
 		}
 		if f.Custom {
+			newRel := snapshot.RenameRelPath(f.Path, ren.OldName, ren.NewName)
+			if fresh[newRel] {
+				// The destination was scaffolded this run by the custom
+				// (overwrite: false) template. Replace it with the developer's
+				// existing custom file so custom hooks survive the rename.
+				if err := os.Remove(filepath.Join(outputDir, filepath.FromSlash(newRel))); err != nil {
+					log.Warn("could not replace scaffolded %s: %v", newRel, err)
+					continue
+				}
+			}
 			newRel, renamed, err := snapshot.RenameEntityFile(outputDir, f.Path, ren.OldName, ren.NewName)
 			if err != nil {
 				log.Warn("could not rename %s: %v", f.Path, err)

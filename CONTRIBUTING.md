@@ -139,7 +139,7 @@ templates:
 - Use `{{-` and `-}}` whitespace trimming so output is clean.
 - Feature fields (`createdAt`, `updatedAt`, `createdBy`, `updatedBy`, `deletedAt`, `version`) are auto-injected by features — skip them in field loops with `isFeatureField`.
 - Iterate `range .Entity.Fields` with `if` filters instead of pre-computing slices; prefer clear names over clever control flow.
-- **Split Core (always regenerated) and Custom (`overwrite: false`) code.** Generated logic belongs behind interfaces/base classes; the developer-owned implementation is scaffolded only once. The migration engine protects custom files when entities are deleted, renamed, or change types.
+- **Split Core (always regenerated) and Custom (`overwrite: false`) code.** Generated logic belongs behind interfaces/base classes; the developer-owned implementation is scaffolded only once. The migration engine protects custom files when entities are deleted, renamed, or change types. The C# bridge (`DomainCraftCsharp`) is the reference implementation: it ships the full **Generation Gap** pattern (`partial class` services split into an always-overwritten generated part with `partial void` hooks and a scaffold-once developer part).
 
 ### Schema migration (snapshots)
 

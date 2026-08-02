@@ -232,6 +232,8 @@ Without `--prune`, non-interactive runs only print warnings and keep the previou
 
 A **bridge** is a directory containing Go templates and configuration that tells DomainCraft how to generate code for a specific language and framework. Bridges are completely decoupled from the core -- you can create your own without modifying any Go code.
 
+**Day-2 safety:** bridge templates may declare `overwrite: false` to scaffold a file only once. That file is developer-owned and survives every regeneration — combine it with interfaces or `partial`/base classes so generated logic is always refreshed while your custom code stays put (the C# bridge ships this **Generation Gap** pattern: regenerated `partial` services with `OnBeforeCreate/Update/Delete` hooks plus a scaffold-once custom partial). The migration engine protects these files when entities are renamed or deleted.
+
 ### Available Bridges
 
 | Bridge | Language/Framework | Status |
