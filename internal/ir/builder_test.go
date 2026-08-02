@@ -363,3 +363,145 @@ func TestBuildCopiesDatabaseColumnName(t *testing.T) {
 	}
 	t.Fatal("firstName field not found in IR")
 }
+
+// TestBuildResolvesTargetEntityAfterTopoSort is a regression test: after the
+// topological sort reorders the entity slice, every relation's TargetEntity
+// pointer must still point at the correct entity (the in-place reorder used to
+// overwrite the backing array the pointers referenced, corrupting the targets).
+func TestBuildResolvesTargetEntityAfterTopoSort(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		Database:    "postgresql",
+		EntityOrder: []string{"User", "Product", "Category", "Order", "OrderItem", "Tag", "Review", "Document"},
+		Entities: map[string]*parser.ParsedEntity{
+			"User": {
+				Name:       "User",
+				NamePlural: "Users",
+				FieldOrder: []string{"id"},
+				Fields:     map[string]*parser.ParsedField{"id": mustParsedField(t, "id", "uuid [primary]")},
+			},
+			"Product": {
+				Name:       "Product",
+				NamePlural: "Products",
+				FieldOrder: []string{"id", "categoryId", "supplierId", "tags"},
+				Fields: map[string]*parser.ParsedField{
+					"id":         mustParsedField(t, "id", "uuid [primary]"),
+					"categoryId": mustParsedField(t, "categoryId", "relation(Category)"),
+					"supplierId": mustParsedField(t, "supplierId", "relation(User)"),
+					"tags":       mustParsedField(t, "tags", "relation(Tag) [many]"),
+				},
+			},
+			"Category": {
+				Name:       "Category",
+				NamePlural: "Categories",
+				FieldOrder: []string{"id"},
+				Fields:     map[string]*parser.ParsedField{"id": mustParsedField(t, "id", "uuid [primary]")},
+			},
+			"Order": {
+				Name:       "Order",
+				NamePlural: "Orders",
+				FieldOrder: []string{"id", "userId"},
+				Fields: map[string]*parser.ParsedField{
+					"id":     mustParsedField(t, "id", "uuid [primary]"),
+					"userId": mustParsedField(t, "userId", "relation(User)"),
+				},
+			},
+			"OrderItem": {
+				Name:       "OrderItem",
+				NamePlural: "OrderItems",
+				FieldOrder: []string{"id", "orderId", "productId"},
+				Fields: map[string]*parser.ParsedField{
+					"id":        mustParsedField(t, "id", "uuid [primary]"),
+					"orderId":   mustParsedField(t, "orderId", "relation(Order)"),
+					"productId": mustParsedField(t, "productId", "relation(Product)"),
+				},
+			},
+			"Tag": {
+				Name:       "Tag",
+				NamePlural: "Tags",
+				FieldOrder: []string{"id"},
+				Fields:     map[string]*parser.ParsedField{"id": mustParsedField(t, "id", "uuid [primary]")},
+			},
+			"Review": {
+				Name:       "Review",
+				NamePlural: "Reviews",
+				FieldOrder: []string{"id", "productId", "userId"},
+				Fields: map[string]*parser.ParsedField{
+					"id":        mustParsedField(t, "id", "uuid [primary]"),
+					"productId": mustParsedField(t, "productId", "relation(Product)"),
+					"userId":    mustParsedField(t, "userId", "relation(User)"),
+				},
+			},
+			"Document": {
+				Name:       "Document",
+				NamePlural: "Documents",
+				FieldOrder: []string{"id", "authorId"},
+				Fields: map[string]*parser.ParsedField{
+					"id":       mustParsedField(t, "id", "uuid [primary]"),
+					"authorId": mustParsedField(t, "authorId", "relation(User)"),
+				},
+			},
+		},
+	}
+
+	projectIR, err := Build(schema)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	byName := make(map[string]*IREntity, len(projectIR.Entities))
+	for i := range projectIR.Entities {
+		byName[projectIR.Entities[i].Name] = &projectIR.Entities[i]
+	}
+
+	product := byName["Product"]
+	if product == nil {
+		t.Fatal("Product entity not found")
+	}
+
+	wantOut := []struct {
+		field  string
+		target string
+		many   bool
+	}{
+		{"categoryId", "Category", false},
+		{"supplierId", "User", false},
+		{"tags", "Tag", true},
+	}
+	if len(product.RelationsOut) != len(wantOut) {
+		t.Fatalf("Product.RelationsOut = %d relations, want %d", len(product.RelationsOut), len(wantOut))
+	}
+	for i, want := range wantOut {
+		rel := product.RelationsOut[i]
+		if rel.FieldName != want.field {
+			t.Errorf("RelationsOut[%d].FieldName = %q, want %q", i, rel.FieldName, want.field)
+		}
+		if rel.TargetEntity == nil || rel.TargetEntity.Name != want.target {
+			t.Errorf("RelationsOut[%d] (%s) target = %v, want %q", i, rel.FieldName, targetName(rel.TargetEntity), want.target)
+		}
+		if rel.IsMany != want.many {
+			t.Errorf("RelationsOut[%d] (%s) IsMany = %v, want %v", i, rel.FieldName, rel.IsMany, want.many)
+		}
+	}
+
+	// Every pointer must live in the returned project slice (not a stale copy).
+	for i := range projectIR.Entities {
+		for _, rel := range projectIR.Entities[i].RelationsOut {
+			if rel.TargetEntity != nil && rel.TargetEntity != byName[rel.TargetEntity.Name] {
+				t.Errorf("%s.RelationsOut[%s] target pointer is stale", projectIR.Entities[i].Name, rel.FieldName)
+			}
+		}
+		for _, rel := range projectIR.Entities[i].RelationsIn {
+			if rel.TargetEntity != nil && rel.TargetEntity != byName[rel.TargetEntity.Name] {
+				t.Errorf("%s.RelationsIn[%s] target pointer is stale", projectIR.Entities[i].Name, rel.FieldName)
+			}
+		}
+	}
+}
+
+func targetName(e *IREntity) string {
+	if e == nil {
+		return "<nil>"
+	}
+	return e.Name
+}

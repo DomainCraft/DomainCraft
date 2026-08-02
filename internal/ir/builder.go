@@ -186,14 +186,17 @@ func Build(schema *parser.ParsedSchema) (*IRProject, error) {
 
 	// Topologically sort entities by FK dependencies (parents before children),
 	// so the seeder inserts rows in the correct order.
-	sortEntities(irProject.Entities)
+	irProject.Entities = sortEntities(irProject.Entities)
 
 	return irProject, nil
 }
 
-// sortEntities reorders the slice in place by FK dependencies using Kahn's algorithm.
+// sortEntities reorders the slice by FK dependencies using Kahn's algorithm.
 // The order is deterministic: ties are broken by entity name.
-func sortEntities(entities []IREntity) {
+// It returns a new slice because relations hold *IREntity pointers into the
+// original backing array; the original must stay intact until every pointer has
+// been rebound to its new location.
+func sortEntities(entities []IREntity) []IREntity {
 	byName := make(map[string]int, len(entities))
 	for i, e := range entities {
 		byName[e.Name] = i
@@ -258,30 +261,32 @@ func sortEntities(entities []IREntity) {
 		order = append(order, remaining...)
 	}
 
-	// Reorder in place. Relations hold *IREntity pointers, so after moving the
-	// values we must rebind every pointer to the element's new location.
+	// Build the reordered slice. The source `entities` backing array is left
+	// untouched, so every TargetEntity pointer still points to valid memory we
+	// can read the name from while rebinding it to the new slice.
 	sorted := make([]IREntity, 0, len(entities))
 	for _, name := range order {
 		sorted = append(sorted, entities[byName[name]])
 	}
-	copy(entities, sorted)
 
-	relocated := make(map[string]*IREntity, len(entities))
-	for i := range entities {
-		relocated[entities[i].Name] = &entities[i]
+	relocated := make(map[string]*IREntity, len(sorted))
+	for i := range sorted {
+		relocated[sorted[i].Name] = &sorted[i]
 	}
-	for i := range entities {
-		for j := range entities[i].RelationsOut {
-			if entities[i].RelationsOut[j].TargetEntity != nil {
-				entities[i].RelationsOut[j].TargetEntity = relocated[entities[i].RelationsOut[j].TargetEntity.Name]
+	for i := range sorted {
+		for j := range sorted[i].RelationsOut {
+			if sorted[i].RelationsOut[j].TargetEntity != nil {
+				sorted[i].RelationsOut[j].TargetEntity = relocated[sorted[i].RelationsOut[j].TargetEntity.Name]
 			}
 		}
-		for j := range entities[i].RelationsIn {
-			if entities[i].RelationsIn[j].TargetEntity != nil {
-				entities[i].RelationsIn[j].TargetEntity = relocated[entities[i].RelationsIn[j].TargetEntity.Name]
+		for j := range sorted[i].RelationsIn {
+			if sorted[i].RelationsIn[j].TargetEntity != nil {
+				sorted[i].RelationsIn[j].TargetEntity = relocated[sorted[i].RelationsIn[j].TargetEntity.Name]
 			}
 		}
 	}
+
+	return sorted
 }
 
 func convertValidations(source map[string]string) []IRValidation {
