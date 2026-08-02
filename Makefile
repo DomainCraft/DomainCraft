@@ -3,13 +3,25 @@ BRIDGE ?= bridges/csharp
 OUTPUT ?= generated
 BRIDGE_NAME ?= csharp
 SPEC_OUTPUT ?= spec/domain.schema.json
+GUI_DIR ?= ../DomainCraftGui
+SKILLS_DIR ?= ../DomainCraft-skills/domaincraft-core
 GO_CACHE_DIR ?= $(CURDIR)/.gocache
 GO_TMP_DIR ?= $(CURDIR)/bin
+
+# Cross-platform file copy used by the spec-distribution targets.
+# Cross-platform copy used by the spec-distribution targets.
+ifeq ($(OS),Windows_NT)
+COPY_CMD = copy /Y "$(subst /,\,$(SPEC_OUTPUT))" "$(subst /,\,$(SKILLS_DIR))\domain.schema.json"
+GUI_CMD = cd /d "$(subst /,\,$(GUI_DIR))" && call npm run generate:types
+else
+COPY_CMD = cp "$(SPEC_OUTPUT)" "$(SKILLS_DIR)/domain.schema.json"
+GUI_CMD = cd $(GUI_DIR) && npm run generate:types
+endif
 
 export GOCACHE := $(GO_CACHE_DIR)
 export GOTMPDIR := $(GO_TMP_DIR)
 
-.PHONY: help build install run test test-verbose test-coverage lint fmt clean install-deps cli-validate cli-generate cli-new cli-bridges regenerate-spec generate-gui-types build-wasm build-wasm-gui
+.PHONY: help build install run test test-verbose test-coverage lint fmt clean install-deps cli-validate cli-generate cli-new cli-bridges regenerate-spec generate-gui-types copy-spec-skills build-wasm build-wasm-gui
 
 help:
 	@echo "DomainCraft CLI - Available Commands"
@@ -21,8 +33,9 @@ help:
 	@echo "  make cli-validate    - Run 'validate' command (uses DOMAIN=$(DOMAIN))"
 	@echo "  make cli-generate    - Run 'generate' command (uses DOMAIN=$(DOMAIN) BRIDGE=$(BRIDGE) OUTPUT=$(OUTPUT))"
 	@echo "  make cli-bridges     - List available bridges"
-	@echo "  make regenerate-spec - Regenerate spec/domain.schema.json and GUI TypeScript types"
+	@echo "  make regenerate-spec - Regenerate spec/domain.schema.json, copy to skills, and regenerate GUI types"
 	@echo "  make generate-gui-types - Regenerate only GUI TypeScript types from schema"
+	@echo "  make copy-spec-skills - Copy regenerated schema to DomainCraft-skills/domaincraft-core"
 	@echo "  make build-wasm      - Build WASM validator binary (GOOS=js GOARCH=wasm)"
 	@echo "  make build-wasm-gui  - Build WASM and copy to DomainCraftGui/public/wasm/"
 	@echo "  make test            - Run all tests"
@@ -78,12 +91,25 @@ cli-bridges:
 regenerate-spec:
 	@echo "Running: go run ./cmd/schema-gen -o $(SPEC_OUTPUT)"
 	@go run ./cmd/schema-gen -o $(SPEC_OUTPUT)
-	@echo "Generating TypeScript types for GUI..."
-	@cd ../DomainCraftGui && npm run generate:types
+	@$(MAKE) --no-print-directory copy-spec-skills
+	@$(MAKE) --no-print-directory generate-gui-types
 
 generate-gui-types:
+ifeq ($(wildcard $(GUI_DIR)/package.json),)
+	@echo "WARNING: GUI directory not found at $(GUI_DIR), skipping GUI types."
+else
 	@echo "Generating TypeScript types for GUI..."
-	@cd ../DomainCraftGui && npm run generate:types
+	@$(GUI_CMD)
+endif
+
+copy-spec-skills:
+ifeq ($(wildcard $(SKILLS_DIR)),)
+	@echo "WARNING: skills directory not found at $(SKILLS_DIR), skipping schema copy."
+else
+	@echo "Copying schema to skills..."
+	@$(COPY_CMD)
+	@echo "Copied schema to $(SKILLS_DIR)/domain.schema.json"
+endif
 
 test: install-deps
 	@echo "Running tests..."
