@@ -29,6 +29,27 @@ type ProjectConfig struct {
 	Cache        *CacheConfig        `yaml:"cache" json:"cache,omitempty"`
 	CORS         *CORSConfig         `yaml:"cors" json:"cors,omitempty"`
 	Deploy       *DeployConfig       `yaml:"deploy" json:"deploy,omitempty"`
+	// Versioning controls API versioning. Language-agnostic: the bridge decides
+	// how to express it (Asp.Versioning, Django REST framework versioning, etc.).
+	Versioning *VersioningConfig `yaml:"versioning" json:"versioning,omitempty"`
+	// RateLimit controls HTTP rate limiting policy (permit limit / window / algorithm).
+	RateLimit *RateLimitConfig `yaml:"rate_limit" json:"rate_limit,omitempty"`
+	// Pagination controls list endpoint page sizing (default page size + hard cap).
+	Pagination *PaginationConfig `yaml:"pagination" json:"pagination,omitempty"`
+	// Infrastructure declares the backing services (message broker, distributed
+	// cache, secrets store) that addons such as Dapr wire up at runtime. Kept
+	// purely declarative and provider-agnostic — no specific library/cloud terms.
+	Infrastructure *InfrastructureConfig `yaml:"infrastructure" json:"infrastructure,omitempty"`
+}
+
+// InfrastructureConfig declares the provider-agnostic infrastructure backing a
+// project. Bridges that ship an addon (e.g. Dapr) turn these into concrete
+// components (pubsub/statestore/secrets) while the domain model stays clean.
+type InfrastructureConfig struct {
+	Queue   string `yaml:"queue" json:"queue,omitempty"`     // message broker: pubsub, rabbitmq, kafka, redis, nats, in-memory
+	Cache   string `yaml:"cache" json:"cache,omitempty"`     // distributed cache store: redis, memcached, in-memory
+	Secrets string `yaml:"secrets" json:"secrets,omitempty"` // secrets store: local, kubernetes, azure-keyvault, aws-secrets
+	Storage string `yaml:"storage" json:"storage,omitempty"` // object/file storage: local, s3, azure-blob, gcs
 }
 
 // AuthConfig describes authentication configuration.
@@ -73,6 +94,26 @@ type CacheConfig struct {
 type CORSConfig struct {
 	Enabled bool     `yaml:"enabled" json:"enabled"`
 	Origins []string `yaml:"origins" json:"origins,omitempty"`
+}
+
+// VersioningConfig represents API versioning configuration.
+type VersioningConfig struct {
+	Enabled        bool   `yaml:"enabled" json:"enabled"`
+	DefaultVersion string `yaml:"default_version" json:"default_version,omitempty"`
+}
+
+// RateLimitConfig represents HTTP request rate limiting configuration.
+type RateLimitConfig struct {
+	Enabled       bool   `yaml:"enabled" json:"enabled"`
+	Policy        string `yaml:"policy" json:"policy,omitempty"` // fixed | sliding
+	PermitLimit   int    `yaml:"permit_limit" json:"permit_limit,omitempty"`
+	WindowSeconds int    `yaml:"window_seconds" json:"window_seconds,omitempty"`
+}
+
+// PaginationConfig represents list pagination sizing.
+type PaginationConfig struct {
+	DefaultPageSize int `yaml:"default_page_size" json:"default_page_size,omitempty"`
+	MaxPageSize     int `yaml:"max_page_size" json:"max_page_size,omitempty"`
 }
 
 // MultiTenancyConfig holds multi-tenancy settings
@@ -230,6 +271,39 @@ func ParseRawSchema(data []byte) (*RawSchema, error) {
 	}
 	if schema.Project.Deploy.Domain == "" {
 		schema.Project.Deploy.Domain = "localhost"
+	}
+
+	// Versioning defaults — enabled with default version "1.0".
+	if schema.Project.Versioning == nil {
+		schema.Project.Versioning = &VersioningConfig{Enabled: true}
+	}
+	if schema.Project.Versioning.DefaultVersion == "" {
+		schema.Project.Versioning.DefaultVersion = "1.0"
+	}
+
+	// Rate limit defaults — enabled, fixed window, 100 req / 60s.
+	if schema.Project.RateLimit == nil {
+		schema.Project.RateLimit = &RateLimitConfig{Enabled: true}
+	}
+	if schema.Project.RateLimit.Policy == "" {
+		schema.Project.RateLimit.Policy = "fixed"
+	}
+	if schema.Project.RateLimit.PermitLimit == 0 {
+		schema.Project.RateLimit.PermitLimit = 100
+	}
+	if schema.Project.RateLimit.WindowSeconds == 0 {
+		schema.Project.RateLimit.WindowSeconds = 60
+	}
+
+	// Pagination defaults — 20 per page, capped at 200.
+	if schema.Project.Pagination == nil {
+		schema.Project.Pagination = &PaginationConfig{}
+	}
+	if schema.Project.Pagination.DefaultPageSize == 0 {
+		schema.Project.Pagination.DefaultPageSize = 20
+	}
+	if schema.Project.Pagination.MaxPageSize == 0 {
+		schema.Project.Pagination.MaxPageSize = 200
 	}
 
 	return schema, nil

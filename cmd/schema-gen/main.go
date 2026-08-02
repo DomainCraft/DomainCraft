@@ -74,6 +74,18 @@ func buildSchema() map[string]any {
 					"deploy": map[string]any{
 						"$ref": "#/$defs/DeployConfig",
 					},
+					"versioning": map[string]any{
+						"$ref": "#/$defs/VersioningConfig",
+					},
+					"rate_limit": map[string]any{
+						"$ref": "#/$defs/RateLimitConfig",
+					},
+					"pagination": map[string]any{
+						"$ref": "#/$defs/PaginationConfig",
+					},
+					"infrastructure": map[string]any{
+						"$ref": "#/$defs/InfrastructureConfig",
+					},
 				},
 				"required": []string{"name"},
 			},
@@ -119,6 +131,46 @@ func buildSchema() map[string]any {
 				"properties": map[string]any{
 					"domain": map[string]any{"type": "string", "description": "API domain (e.g. localhost, api.example.com)"},
 					"port":   map[string]any{"type": "integer", "minimum": 1, "maximum": 65535, "description": "Exposed application port (default: 8080)"},
+				},
+			},
+			"VersioningConfig": map[string]any{
+				"title":                "VersioningConfig",
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"enabled":         map[string]any{"type": "boolean", "description": "Enable API versioning (default: true)"},
+					"default_version": map[string]any{"type": "string", "description": "Default API version (default: 1.0)"},
+				},
+			},
+			"RateLimitConfig": map[string]any{
+				"title":                "RateLimitConfig",
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"enabled":        map[string]any{"type": "boolean", "description": "Enable request rate limiting (default: true)"},
+					"policy":         map[string]any{"type": "string", "enum": specmeta.RateLimitPolicies, "description": "Limiter algorithm (default: fixed)"},
+					"permit_limit":   map[string]any{"type": "integer", "minimum": 1, "description": "Max requests (default: 100)"},
+					"window_seconds": map[string]any{"type": "integer", "minimum": 1, "description": "Window duration in seconds (default: 60)"},
+				},
+			},
+			"PaginationConfig": map[string]any{
+				"title":                "PaginationConfig",
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"default_page_size": map[string]any{"type": "integer", "minimum": 1, "description": "Default page size (default: 20)"},
+					"max_page_size":     map[string]any{"type": "integer", "minimum": 1, "description": "Hard cap on page size (default: 200)"},
+				},
+			},
+			"InfrastructureConfig": map[string]any{
+				"title":                "InfrastructureConfig",
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"queue":   map[string]any{"type": "string", "enum": specmeta.InfraQueues, "description": "Message broker"},
+					"cache":   map[string]any{"type": "string", "enum": specmeta.InfraCacheStores, "description": "Distributed cache store"},
+					"secrets": map[string]any{"type": "string", "enum": specmeta.InfraSecretStores, "description": "Secrets store"},
+					"storage": map[string]any{"type": "string", "enum": specmeta.InfraStores, "description": "Object/file storage"},
 				},
 			},
 			"EntityDefinition": map[string]any{

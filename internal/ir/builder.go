@@ -24,6 +24,7 @@ func Build(schema *parser.ParsedSchema) (*IRProject, error) {
 		APIStyle:    schema.APIStyle,
 		Platform:    schema.Project.Platform,
 		Enums:       copyEnumsSorted(schema.Enums),
+		EnumOrder:   sortedEnumKeys(schema.Enums),
 		Entities:    make([]IREntity, 0, len(schema.Entities)),
 	}
 
@@ -45,6 +46,34 @@ func Build(schema *parser.ParsedSchema) (*IRProject, error) {
 		irProject.Deploy = &IRDeployConfig{
 			Domain: schema.Project.Deploy.Domain,
 			Port:   schema.Project.Deploy.Port,
+		}
+	}
+	if schema.Project.Versioning != nil {
+		irProject.Versioning = &IRVersioningConfig{
+			Enabled:        schema.Project.Versioning.Enabled,
+			DefaultVersion: schema.Project.Versioning.DefaultVersion,
+		}
+	}
+	if schema.Project.RateLimit != nil {
+		irProject.RateLimit = &IRRateLimitConfig{
+			Enabled:       schema.Project.RateLimit.Enabled,
+			Policy:        schema.Project.RateLimit.Policy,
+			PermitLimit:   schema.Project.RateLimit.PermitLimit,
+			WindowSeconds: schema.Project.RateLimit.WindowSeconds,
+		}
+	}
+	if schema.Project.Pagination != nil {
+		irProject.Pagination = &IRPaginationConfig{
+			DefaultPageSize: schema.Project.Pagination.DefaultPageSize,
+			MaxPageSize:     schema.Project.Pagination.MaxPageSize,
+		}
+	}
+	if schema.Project.Infrastructure != nil {
+		irProject.Infrastructure = &IRInfrastructure{
+			Queue:   schema.Project.Infrastructure.Queue,
+			Cache:   schema.Project.Infrastructure.Cache,
+			Secrets: schema.Project.Infrastructure.Secrets,
+			Storage: schema.Project.Infrastructure.Storage,
 		}
 	}
 
@@ -422,4 +451,14 @@ func copyEnumsSorted(source map[string][]string) map[string][]string {
 		result[k] = cp
 	}
 	return result
+}
+
+// sortedEnumKeys returns a sorted slice of enum names for deterministic iteration.
+func sortedEnumKeys(source map[string][]string) []string {
+	keys := make([]string, 0, len(source))
+	for k := range source {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

@@ -10,11 +10,59 @@ type IRProject struct {
 	Auth        *IRAuthConfig
 	APIStyle    string
 	Platform    string // target platform version (e.g. "net9.0"), passed through to templates
-	Enums       map[string][]string
-	Entities    []IREntity
-	Cache       *IRCacheConfig
-	CORS        *IRCORSConfig
-	Deploy      *IRDeployConfig
+	// Enums maps enum name → ordered values. EnumOrder holds the sorted keys so
+	// templates can iterate deterministically (Go map iteration order is random).
+	Enums     map[string][]string
+	EnumOrder []string
+	Entities  []IREntity
+	Cache     *IRCacheConfig
+	CORS      *IRCORSConfig
+	Deploy    *IRDeployConfig
+	// Versioning carries API versioning settings (enabled flag + default version).
+	Versioning *IRVersioningConfig
+	// RateLimit carries the HTTP request rate limiting policy.
+	RateLimit *IRRateLimitConfig
+	// Pagination carries list sizing defaults (page size + cap).
+	Pagination *IRPaginationConfig
+	// Addons contains the infrastructure accelerators requested via the CLI
+	// (e.g. {"dapr": true}). It is not derived from domain.yaml — declared
+	// infrastructure lives in Infrastructure, addon templates go on/off here.
+	Addons map[string]bool
+	// Infrastructure holds the provider-agnostic backing services declared in
+	// project.infrastructure (queue / cache / secrets). It is the input that
+	// addon bridges like Dapr consume to emit concrete component manifests.
+	Infrastructure *IRInfrastructure
+}
+
+// IRInfrastructure represents the project's backing services in IR.
+type IRInfrastructure struct {
+	Queue   string // message broker: pubsub, rabbitmq, kafka, redis, nats, in-memory
+	Cache   string // distributed cache store: redis, memcached, in-memory
+	Secrets string // secrets store: local, kubernetes, azure-keyvault, aws-secrets
+	Storage string // object/file storage: local, s3, azure-blob, gcs
+}
+
+// HasAddon returns true if the named infrastructure addon is enabled.
+func (p *IRProject) HasAddon(name string) bool {
+	if p.Addons == nil {
+		return false
+	}
+	return p.Addons[name]
+}
+
+// HasInfraQueue returns true when a message broker is declared.
+func (p *IRProject) HasInfraQueue() bool {
+	return p.Infrastructure != nil && p.Infrastructure.Queue != "" && p.Infrastructure.Queue != "in-memory"
+}
+
+// HasInfraStorage returns true when an object/file storage is declared.
+func (p *IRProject) HasInfraStorage() bool {
+	return p.Infrastructure != nil && p.Infrastructure.Storage != "" && p.Infrastructure.Storage != "local"
+}
+
+// HasInfraCache returns true when a distributed cache store is declared.
+func (p *IRProject) HasInfraCache() bool {
+	return p.Infrastructure != nil && p.Infrastructure.Cache != "" && p.Infrastructure.Cache != "in-memory"
 }
 
 // IRAuthConfig represents authentication configuration in IR.
@@ -55,6 +103,36 @@ type IRCORSConfig struct {
 type IRDeployConfig struct {
 	Domain string // API domain (e.g. "localhost", "api.example.com")
 	Port   int    // exposed port (default: 8080)
+}
+
+// Versioning enables/disables API versioning and the default version string.
+type IRVersioningConfig struct {
+	Enabled        bool
+	DefaultVersion string
+}
+
+// RateLimitConfig represents the HTTP request rate limiting policy in IR.
+type IRRateLimitConfig struct {
+	Enabled       bool
+	Policy        string // fixed | sliding
+	PermitLimit   int
+	WindowSeconds int
+}
+
+// IRPaginationConfig represents list pagination sizing in IR.
+type IRPaginationConfig struct {
+	DefaultPageSize int
+	MaxPageSize     int
+}
+
+// HasVersioning returns true when API versioning is enabled.
+func (p *IRProject) HasVersioning() bool {
+	return p.Versioning != nil && p.Versioning.Enabled
+}
+
+// HasRateLimit returns true when request rate limiting is enabled.
+func (p *IRProject) HasRateLimit() bool {
+	return p.RateLimit != nil && p.RateLimit.Enabled
 }
 
 // IREntity represents an entity in IR.
@@ -130,6 +208,12 @@ func (e IREntity) HasSoftDelete() bool { return e.HasFeature("soft_delete") }
 
 // HasOptimisticLock returns true if the entity has the optimistic_lock feature enabled.
 func (e IREntity) HasOptimisticLock() bool { return e.HasFeature("optimistic_lock") }
+
+// HasEventSourced returns true if the entity emits domain events (event_sourced feature).
+func (e IREntity) HasEventSourced() bool { return e.HasFeature("event_sourced") }
+
+// HasCacheable returns true if the entity should use the distributed cache (cacheable feature).
+func (e IREntity) HasCacheable() bool { return e.HasFeature("cacheable") }
 
 // IsArray returns true if the field's DatabaseType is an array type (e.g. "array(int)").
 func (f IRField) IsArray() bool {

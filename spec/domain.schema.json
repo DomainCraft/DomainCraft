@@ -123,7 +123,9 @@
               "audit",
               "audit_log",
               "soft_delete",
-              "optimistic_lock"
+              "optimistic_lock",
+              "event_sourced",
+              "cacheable"
             ],
             "type": "string"
           },
@@ -228,6 +230,54 @@
       "title": "IndexDefinition",
       "type": "object"
     },
+    "InfrastructureConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "cache": {
+          "description": "Distributed cache store",
+          "enum": [
+            "redis",
+            "memcached",
+            "in-memory"
+          ],
+          "type": "string"
+        },
+        "queue": {
+          "description": "Message broker",
+          "enum": [
+            "pubsub",
+            "rabbitmq",
+            "kafka",
+            "redis",
+            "nats",
+            "in-memory"
+          ],
+          "type": "string"
+        },
+        "secrets": {
+          "description": "Secrets store",
+          "enum": [
+            "local",
+            "kubernetes",
+            "azure-keyvault",
+            "aws-secrets"
+          ],
+          "type": "string"
+        },
+        "storage": {
+          "description": "Object/file storage",
+          "enum": [
+            "local",
+            "s3",
+            "azure-blob",
+            "gcs"
+          ],
+          "type": "string"
+        }
+      },
+      "title": "InfrastructureConfig",
+      "type": "object"
+    },
     "MultiTenancy": {
       "additionalProperties": false,
       "properties": {
@@ -249,6 +299,23 @@
       "title": "MultiTenancy",
       "type": "object"
     },
+    "PaginationConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "default_page_size": {
+          "description": "Default page size (default: 20)",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_page_size": {
+          "description": "Hard cap on page size (default: 200)",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "title": "PaginationConfig",
+      "type": "object"
+    },
     "Project": {
       "additionalProperties": false,
       "properties": {
@@ -264,24 +331,80 @@
         "description": {
           "type": "string"
         },
+        "infrastructure": {
+          "$ref": "#/$defs/InfrastructureConfig"
+        },
         "multi_tenancy": {
           "$ref": "#/$defs/MultiTenancy"
         },
         "name": {
           "type": "string"
         },
+        "pagination": {
+          "$ref": "#/$defs/PaginationConfig"
+        },
         "platform": {
           "description": "Target platform version (e.g. net9.0, net8.0)",
           "type": "string"
         },
+        "rate_limit": {
+          "$ref": "#/$defs/RateLimitConfig"
+        },
         "version": {
           "type": "string"
+        },
+        "versioning": {
+          "$ref": "#/$defs/VersioningConfig"
         }
       },
       "required": [
         "name"
       ],
       "title": "Project",
+      "type": "object"
+    },
+    "RateLimitConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Enable request rate limiting (default: true)",
+          "type": "boolean"
+        },
+        "permit_limit": {
+          "description": "Max requests (default: 100)",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "policy": {
+          "description": "Limiter algorithm (default: fixed)",
+          "enum": [
+            "fixed",
+            "sliding"
+          ],
+          "type": "string"
+        },
+        "window_seconds": {
+          "description": "Window duration in seconds (default: 60)",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "title": "RateLimitConfig",
+      "type": "object"
+    },
+    "VersioningConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "default_version": {
+          "description": "Default API version (default: 1.0)",
+          "type": "string"
+        },
+        "enabled": {
+          "description": "Enable API versioning (default: true)",
+          "type": "boolean"
+        }
+      },
+      "title": "VersioningConfig",
       "type": "object"
     }
   },

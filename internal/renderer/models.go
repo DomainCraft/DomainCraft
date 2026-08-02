@@ -12,6 +12,16 @@ type BridgeConfig struct {
 	RegistryPackages map[string]string `yaml:"registry_packages"` // logical key -> registry package ID (used with registry_url)
 	Templates        []TemplateSpec    `yaml:"templates"`
 	Delimiters       []string          `yaml:"delimiters"` // Optional custom delimiters [left, right], default ["{{", "}}"]
+	Migrations       *MigrationConfig  `yaml:"migrations"` // Optional database migration commands run by `domaincraft generate --migrate`
+}
+
+// MigrationConfig lets a bridge declare how to apply schema changes to a real
+// database after code generation. The CLI runs the commands in order (from the
+// generated output directory) only when `--migrate` is passed. Commands are
+// shell lines executed via the platform shell.
+type MigrationConfig struct {
+	Enabled  bool     `yaml:"enabled"`
+	Commands []string `yaml:"commands"`
 }
 
 // TemplateSpec describes one template rendering rule.
@@ -113,6 +123,22 @@ func (c RenderContext) Seed() []map[string]interface{} {
 // HasFeature reports whether the current entity has the named feature enabled.
 func (c RenderContext) HasFeature(name string) bool {
 	return c.Entity != nil && c.Entity.HasFeature(name)
+}
+
+// HasAddon reports whether the named infrastructure addon is enabled at the
+// project level (e.g. "dapr"). Templates use this to toggle addon-specific code.
+func (c RenderContext) HasAddon(name string) bool {
+	return c.Project != nil && c.Project.HasAddon(name)
+}
+
+// HasEventSourced reports whether the current entity emits domain events.
+func (c RenderContext) HasEventSourced() bool {
+	return c.Entity != nil && c.Entity.HasEventSourced()
+}
+
+// HasCacheable reports whether the current entity should use the distributed cache.
+func (c RenderContext) HasCacheable() bool {
+	return c.Entity != nil && c.Entity.HasCacheable()
 }
 
 // PrimaryKey returns the primary key field of the current entity, or nil if not found.

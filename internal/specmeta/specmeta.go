@@ -18,7 +18,24 @@ var APIStyles = []string{"rest", "graphql", "grpc"}
 
 var AuthTypes = []string{"jwt", "none"}
 
-var Features = []string{"audit", "audit_log", "soft_delete", "optimistic_lock"}
+var Features = []string{"audit", "audit_log", "soft_delete", "optimistic_lock", "event_sourced", "cacheable"}
+
+// Addons are optional infrastructure accelerators that a bridge can opt into
+// via the CLI (e.g. `--addons dapr`). They are NOT declared in domain.yaml —
+// bridges read them at render time to toggle templates. Kept here as the single
+// source of truth so the CLI/interactive layer can validate and list them.
+// Dapr is the canonical addon: it speaks to virtually any broker, state store,
+// secrets provider and output binding, so bridges only need this one.
+// Observability toggles structured logging (Serilog/Seq) + distributed tracing
+// (OpenTelemetry/Jaeger) for bridges that opt in.
+var Addons = []string{"dapr", "observability"}
+
+// Infrastructure providers declared in project.infrastructure. These are the
+// building blocks Dapr (and similar addons) wire up at runtime.
+var InfraQueues = []string{"pubsub", "rabbitmq", "kafka", "redis", "nats", "in-memory"}
+var InfraCacheStores = []string{"redis", "memcached", "in-memory"}
+var InfraSecretStores = []string{"local", "kubernetes", "azure-keyvault", "aws-secrets"}
+var InfraStores = []string{"local", "s3", "azure-blob", "gcs"}
 
 var MetaFieldTypes = []string{"relation", "array", "enum"}
 
@@ -54,6 +71,8 @@ var CacheProviders = []string{"redis", "memcached", "in-memory"}
 
 var MultiTenancyModes = []string{"column", "schema", "database"}
 
+var RateLimitPolicies = []string{"fixed", "sliding"}
+
 var PermissionKeys = []string{"read", "create", "update", "delete"}
 
 var SortDirections = []string{"asc", "desc"}
@@ -78,6 +97,7 @@ var (
 	indexTypeSet            map[string]bool
 	cacheProviderSet        map[string]bool
 	multiTenancyModeSet     map[string]bool
+	rateLimitPolicySet      map[string]bool
 	permissionKeySet        map[string]bool
 	stringValidationModSet  map[string]bool
 	numericValidationModSet map[string]bool
@@ -85,6 +105,11 @@ var (
 	databaseSet             map[string]bool
 	apiStyleSet             map[string]bool
 	authTypeSet             map[string]bool
+	addonSet                map[string]bool
+	infraQueueSet           map[string]bool
+	infraCacheStoreSet      map[string]bool
+	infraSecretStoreSet     map[string]bool
+	infraStoreSet           map[string]bool
 )
 
 func init() {
@@ -98,6 +123,7 @@ func init() {
 	indexTypeSet = SliceToSet(IndexTypes)
 	cacheProviderSet = SliceToSet(CacheProviders)
 	multiTenancyModeSet = SliceToSet(MultiTenancyModes)
+	rateLimitPolicySet = SliceToSet(RateLimitPolicies)
 	permissionKeySet = SliceToSet(PermissionKeys)
 	stringValidationModSet = SliceToSet(StringValidationModifiers)
 	numericValidationModSet = SliceToSet(NumericValidationModifiers)
@@ -105,6 +131,11 @@ func init() {
 	databaseSet = SliceToSet(Databases)
 	apiStyleSet = SliceToSet(APIStyles)
 	authTypeSet = SliceToSet(AuthTypes)
+	addonSet = SliceToSet(Addons)
+	infraQueueSet = SliceToSet(InfraQueues)
+	infraCacheStoreSet = SliceToSet(InfraCacheStores)
+	infraSecretStoreSet = SliceToSet(InfraSecretStores)
+	infraStoreSet = SliceToSet(InfraStores)
 }
 
 func IsPrimitive(typeName string) bool            { return primitiveSet[typeName] }
@@ -118,10 +149,16 @@ func IsFeature(name string) bool                  { return featureSet[name] }
 func IsIndexType(value string) bool               { return indexTypeSet[value] }
 func IsCacheProvider(value string) bool           { return cacheProviderSet[value] }
 func IsMultiTenancyMode(value string) bool        { return multiTenancyModeSet[value] }
+func IsRateLimitPolicy(value string) bool         { return rateLimitPolicySet[value] }
 func IsPermissionKey(value string) bool           { return permissionKeySet[value] }
 func IsDatabase(value string) bool                { return databaseSet[value] }
 func IsAPIStyle(value string) bool                { return apiStyleSet[value] }
 func IsAuthType(value string) bool                { return authTypeSet[value] }
+func IsAddon(value string) bool                   { return addonSet[value] }
+func IsInfraQueue(value string) bool              { return infraQueueSet[value] }
+func IsInfraCacheStore(value string) bool         { return infraCacheStoreSet[value] }
+func IsInfraSecretStore(value string) bool        { return infraSecretStoreSet[value] }
+func IsInfraStore(value string) bool              { return infraStoreSet[value] }
 func IsStringValidationModifier(mod string) bool  { return stringValidationModSet[mod] }
 func IsNumericValidationModifier(mod string) bool { return numericValidationModSet[mod] }
 

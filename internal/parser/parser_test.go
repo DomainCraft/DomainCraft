@@ -537,6 +537,89 @@ entities:
 	}
 }
 
+func TestParseVersioningRateLimitPaginationDefaults(t *testing.T) {
+	yamlData := []byte(`
+project:
+  name: Test
+entities:
+  User:
+    fields:
+      id: uuid [primary]
+`)
+	parsed, err := ParseRawSchema(yamlData)
+	if err != nil {
+		t.Fatalf("ParseRawSchema() error = %v", err)
+	}
+
+	if parsed.Project.Versioning == nil || !parsed.Project.Versioning.Enabled {
+		t.Fatal("Versioning should default to enabled")
+	}
+	if parsed.Project.Versioning.DefaultVersion != "1.0" {
+		t.Errorf("Versioning.DefaultVersion = %q, want 1.0", parsed.Project.Versioning.DefaultVersion)
+	}
+
+	if parsed.Project.RateLimit == nil || !parsed.Project.RateLimit.Enabled {
+		t.Fatal("RateLimit should default to enabled")
+	}
+	if parsed.Project.RateLimit.Policy != "fixed" {
+		t.Errorf("RateLimit.Policy = %q, want fixed", parsed.Project.RateLimit.Policy)
+	}
+	if parsed.Project.RateLimit.PermitLimit != 100 {
+		t.Errorf("RateLimit.PermitLimit = %d, want 100", parsed.Project.RateLimit.PermitLimit)
+	}
+	if parsed.Project.RateLimit.WindowSeconds != 60 {
+		t.Errorf("RateLimit.WindowSeconds = %d, want 60", parsed.Project.RateLimit.WindowSeconds)
+	}
+
+	if parsed.Project.Pagination == nil {
+		t.Fatal("Pagination should not be nil (defaults set)")
+	}
+	if parsed.Project.Pagination.DefaultPageSize != 20 {
+		t.Errorf("Pagination.DefaultPageSize = %d, want 20", parsed.Project.Pagination.DefaultPageSize)
+	}
+	if parsed.Project.Pagination.MaxPageSize != 200 {
+		t.Errorf("Pagination.MaxPageSize = %d, want 200", parsed.Project.Pagination.MaxPageSize)
+	}
+}
+
+func TestParseVersioningRateLimitExplicit(t *testing.T) {
+	yamlData := []byte(`
+project:
+  name: Test
+  versioning:
+    enabled: false
+    default_version: "2.0"
+  rate_limit:
+    enabled: true
+    policy: sliding
+    permit_limit: 250
+    window_seconds: 120
+entities:
+  User:
+    fields:
+      id: uuid [primary]
+`)
+	parsed, err := ParseRawSchema(yamlData)
+	if err != nil {
+		t.Fatalf("ParseRawSchema() error = %v", err)
+	}
+	if parsed.Project.Versioning.Enabled {
+		t.Error("Versioning.Enabled = true, want false")
+	}
+	if parsed.Project.Versioning.DefaultVersion != "2.0" {
+		t.Errorf("Versioning.DefaultVersion = %q, want 2.0", parsed.Project.Versioning.DefaultVersion)
+	}
+	if parsed.Project.RateLimit.Policy != "sliding" {
+		t.Errorf("RateLimit.Policy = %q, want sliding", parsed.Project.RateLimit.Policy)
+	}
+	if parsed.Project.RateLimit.PermitLimit != 250 {
+		t.Errorf("RateLimit.PermitLimit = %d, want 250", parsed.Project.RateLimit.PermitLimit)
+	}
+	if parsed.Project.RateLimit.WindowSeconds != 120 {
+		t.Errorf("RateLimit.WindowSeconds = %d, want 120", parsed.Project.RateLimit.WindowSeconds)
+	}
+}
+
 func TestParseUnknownEntityKey(t *testing.T) {
 	yamlData := []byte(`
 project:

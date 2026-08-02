@@ -314,7 +314,9 @@ domaincraft bridges        # List available bridges
 --bridge, -b      Bridge ID, path, or owner/repo
 --output, -o      Output directory (default: generated)
 --admin           Generate an admin panel (optional bridge ID, default: admin-refine)
+--addons          Infrastructure accelerators (comma-separated, e.g. "dapr")
 --prune           Apply migration cleanup automatically without prompts (CI)
+--migrate         Run the bridge's database-migration commands after generation (generate only)
 --non-interactive  Disable interactive prompts (for CI/scripts)
 --name            Project name (for 'new' command)
 --version         Project version (for 'new' command)

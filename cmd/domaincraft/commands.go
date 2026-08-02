@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/DomainCraft/DomainCraft/internal/bridge"
@@ -28,6 +30,8 @@ var (
 	nonInteractive bool
 	adminBridge    string // --admin [bridge-id]; empty = not requested
 	prune          bool   // --prune: apply migration cleanup without prompting
+	addonsFlag     string // --addons "dapr,pulsar": comma-separated infrastructure accelerators
+	migrateFlag    bool   // --migrate: run the bridge's database-migration commands after generation
 )
 
 func Execute() {
@@ -47,6 +51,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.PersistentFlags().StringVarP(&bridgePath, "bridge", "b", "", "bridge ID, path, or owner/repo (interactive if omitted)")
 	rootCmd.PersistentFlags().StringVarP(&outputDir, "output", "o", "generated", "output directory")
 	rootCmd.PersistentFlags().BoolVar(&nonInteractive, "non-interactive", false, "disable interactive prompts (requires all flags)")
+	rootCmd.PersistentFlags().StringVar(&addonsFlag, "addons", "", "comma-separated infrastructure addons to enable (e.g. dapr)")
 
 	rootCmd.AddCommand(newNewCmd())
 	rootCmd.AddCommand(newValidateCmd())
@@ -283,6 +288,7 @@ func newGenerateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			applyAddons(irProject)
 
 			// --- Schema snapshot / migration diff ---
 			snapPath := snapshot.SnapshotPath(outputDir)
@@ -320,6 +326,15 @@ func newGenerateCmd() *cobra.Command {
 					return err
 				}
 				manifest = append(manifest, adminManifest...)
+			}
+
+			// --- Database migrations ---
+			// Optionally run the bridge's declared migration commands so the
+			// developer never has to think about SQL schemas. Gated on --migrate.
+			if migrateFlag && rendererInstance.MigrationConfig() != nil && rendererInstance.MigrationConfig().Enabled {
+				if err := runDatabaseMigrations(rendererInstance.MigrationConfig(), outputDir, cmd, log); err != nil {
+					return err
+				}
 			}
 
 			// --- Migration actions: clean up orphaned / renamed files ---
@@ -365,6 +380,8 @@ func newGenerateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&adminBridge, "admin", "", "generate admin panel (optionally specify bridge ID, default: admin-refine)")
 	// --prune — automatically delete/rename orphaned files without prompting (CI).
 	cmd.Flags().BoolVar(&prune, "prune", false, "automatically remove/rename orphaned files detected by the migration engine (no prompts)")
+	// --migrate — after generation, run the bridge's declared database-migration commands.
+	cmd.Flags().BoolVar(&migrateFlag, "migrate", false, "run the bridge's database-migration commands after generation (e.g. dotnet ef database update)")
 
 	return cmd
 }
@@ -436,6 +453,8 @@ func resolveBridgeInteractive() (string, string, error) {
 	return resolved, entry.Name, nil
 }
 
+// generateAdminPanel renders the optional admin panel bridge into the output
+// directory and returns the extra file manifest entries.
 func generateAdminPanel(irProject *ir.IRProject, log *logger.Logger) ([]renderer.RenderedFile, error) {
 	resolver := bridge.NewResolver(bridge.Default())
 
@@ -462,6 +481,39 @@ func generateAdminPanel(irProject *ir.IRProject, log *logger.Logger) ([]renderer
 
 	log.Success("Generated %d admin file(s)", len(adminFiles))
 	return adminManifest, nil
+}
+
+// runDatabaseMigrations executes the bridge's declared database-migration
+// commands in order, from the generated output directory. Commands are shell
+// lines invoked through the platform shell so bridges can rely on standard
+// tooling (e.g. `dotnet ef ...`). A failing command aborts the run.
+func runDatabaseMigrations(cfg *renderer.MigrationConfig, outDir string, cmd *cobra.Command, log *logger.Logger) error {
+	if cfg == nil || !cfg.Enabled || len(cfg.Commands) == 0 {
+		return nil
+	}
+	out := cmd.OutOrStdout()
+	for i, command := range cfg.Commands {
+		log.Info("Migration %d/%d: %s", i+1, len(cfg.Commands), command)
+		var argv []string
+		var shell string
+		if runtime.GOOS == "windows" {
+			shell = "cmd"
+			argv = []string{"/C", command}
+		} else {
+			shell = "sh"
+			argv = []string{"-c", command}
+		}
+		c := exec.Command(shell, argv...)
+		c.Dir = outDir
+		c.Stdout = out
+		c.Stderr = out
+		if err := c.Run(); err != nil {
+			log.Error("Migration failed: %s", err)
+			return fmt.Errorf("database migration %d failed: %w", i+1, err)
+		}
+	}
+	log.Success("Database migrations applied")
+	return nil
 }
 
 // applyMigrationActions handles orphaned file cleanup for entities that were
@@ -625,6 +677,27 @@ func customMark(f snapshot.FileRef) string {
 		return "  [custom]"
 	}
 	return ""
+}
+
+// applyAddons parses the --addons flag into the IR project's Addons set,
+// validating each name against specmeta. Unknown addons are silently ignored so
+// bridges that don't know a given addon simply render their non-addon templates.
+func applyAddons(project *ir.IRProject) {
+	if strings.TrimSpace(addonsFlag) == "" {
+		return
+	}
+	if project.Addons == nil {
+		project.Addons = make(map[string]bool)
+	}
+	for _, addon := range strings.Split(addonsFlag, ",") {
+		addon = strings.TrimSpace(addon)
+		if addon == "" {
+			continue
+		}
+		if specmeta.IsAddon(addon) {
+			project.Addons[addon] = true
+		}
+	}
 }
 
 func loadAndValidate(out io.Writer) (*parser.ParsedSchema, error) {

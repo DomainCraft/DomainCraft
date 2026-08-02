@@ -42,6 +42,12 @@ func New(bridgePath string, log *logger.Logger) (*Renderer, error) {
 	return &Renderer{bridgeDir: bridgeDir, config: config, log: log}, nil
 }
 
+// MigrationConfig exposes the bridge's declared database-migration commands
+// (from migration.yaml bridge manifest), used by `domaincraft generate --migrate`.
+func (r *Renderer) MigrationConfig() *MigrationConfig {
+	return r.config.Migrations
+}
+
 // delimiters returns the configured template delimiters, defaulting to ["{{", "}}"].
 func (r *Renderer) delimiters() (string, string) {
 	if len(r.config.Delimiters) >= 2 {
@@ -402,6 +408,36 @@ func (r *Renderer) shouldRenderContext(spec TemplateSpec, context RenderContext)
 	if spec.When == "" {
 		return true
 	}
+	// Addon & infrastructure conditions. These accept a suffix after a colon,
+	// e.g. "hasAddon:dapr" / "notHasAddon:dapr". Bare "hasAddon" treats the
+	// presence of any addon as true; bare "hasInfraCache"/"hasInfraQueue" check
+	// the declared project.infrastructure.
+	if cond, name, ok := strings.Cut(spec.When, ":"); ok {
+		switch strings.TrimSpace(cond) {
+		case "hasAddon":
+			if context.Project != nil {
+				if name == "" {
+					return len(context.Project.Addons) > 0
+				}
+				return context.Project.HasAddon(strings.TrimSpace(name))
+			}
+			return false
+		case "notHasAddon":
+			if context.Project != nil {
+				if name == "" {
+					return len(context.Project.Addons) == 0
+				}
+				return !context.Project.HasAddon(strings.TrimSpace(name))
+			}
+			return true
+		case "hasInfraCache":
+			return context.Project != nil && context.Project.HasInfraCache()
+		case "hasInfraQueue":
+			return context.Project != nil && context.Project.HasInfraQueue()
+		case "hasInfraStorage":
+			return context.Project != nil && context.Project.HasInfraStorage()
+		}
+	}
 	switch spec.When {
 	case "hasSeed":
 		// Only render seed templates if there's actual seed data
@@ -450,6 +486,26 @@ func (r *Renderer) shouldRenderContext(spec TemplateSpec, context RenderContext)
 		return false
 	case "hasAuth":
 		return context.Project != nil && context.Project.HasAuth()
+	case "hasEventSourced":
+		// Only render event infrastructure if at least one entity emits events.
+		if context.Project != nil {
+			for _, e := range context.Project.Entities {
+				if e.HasEventSourced() {
+					return true
+				}
+			}
+		}
+		return false
+	case "hasCacheable":
+		// Only render cacheable-related infrastructure if at least one entity uses it.
+		if context.Project != nil {
+			for _, e := range context.Project.Entities {
+				if e.HasCacheable() {
+					return true
+				}
+			}
+		}
+		return false
 	default:
 		return true
 	}

@@ -144,6 +144,53 @@ func (v *Validator) validateProject() []ValidationError {
 		}
 	}
 
+	// Versioning
+	if p.Versioning != nil && p.Versioning.Enabled && p.Versioning.DefaultVersion == "" {
+		errs = append(errs, ValidationError{Entity: "<schema>", Message: "versioning.enabled is true but default_version is empty", Warning: true})
+	}
+
+	// Rate limiting
+	if p.RateLimit != nil {
+		if p.RateLimit.Policy != "" && !specmeta.IsRateLimitPolicy(p.RateLimit.Policy) {
+			errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("unknown rate_limit.policy %q; allowed: %s", p.RateLimit.Policy, strings.Join(specmeta.RateLimitPolicies, ", "))})
+		}
+		if p.RateLimit.PermitLimit < 0 {
+			errs = append(errs, ValidationError{Entity: "<schema>", Message: "rate_limit.permit_limit must be non-negative", Warning: true})
+		}
+		if p.RateLimit.WindowSeconds < 1 {
+			errs = append(errs, ValidationError{Entity: "<schema>", Message: "rate_limit.window_seconds must be at least 1", Warning: true})
+		}
+	}
+
+	// Pagination
+	if p.Pagination != nil {
+		if p.Pagination.DefaultPageSize < 1 {
+			errs = append(errs, ValidationError{Entity: "<schema>", Message: "pagination.default_page_size must be at least 1", Warning: true})
+		}
+		if p.Pagination.MaxPageSize < 1 {
+			errs = append(errs, ValidationError{Entity: "<schema>", Message: "pagination.max_page_size must be at least 1", Warning: true})
+		}
+		if p.Pagination.DefaultPageSize > p.Pagination.MaxPageSize {
+			errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("pagination.default_page_size (%d) must not exceed max_page_size (%d)", p.Pagination.DefaultPageSize, p.Pagination.MaxPageSize), Warning: true})
+		}
+	}
+
+	// Infrastructure (provider-agnostic backing services used by addons such as Dapr)
+	if p.Infrastructure != nil {
+		if p.Infrastructure.Queue != "" && !specmeta.IsInfraQueue(p.Infrastructure.Queue) {
+			errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("unknown infrastructure.queue %q; allowed: %s", p.Infrastructure.Queue, strings.Join(specmeta.InfraQueues, ", "))})
+		}
+		if p.Infrastructure.Cache != "" && !specmeta.IsInfraCacheStore(p.Infrastructure.Cache) {
+			errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("unknown infrastructure.cache %q; allowed: %s", p.Infrastructure.Cache, strings.Join(specmeta.InfraCacheStores, ", "))})
+		}
+		if p.Infrastructure.Secrets != "" && !specmeta.IsInfraSecretStore(p.Infrastructure.Secrets) {
+			errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("unknown infrastructure.secrets %q; allowed: %s", p.Infrastructure.Secrets, strings.Join(specmeta.InfraSecretStores, ", "))})
+		}
+		if p.Infrastructure.Storage != "" && !specmeta.IsInfraStore(p.Infrastructure.Storage) {
+			errs = append(errs, ValidationError{Entity: "<schema>", Message: fmt.Sprintf("unknown infrastructure.storage %q; allowed: %s", p.Infrastructure.Storage, strings.Join(specmeta.InfraStores, ", "))})
+		}
+	}
+
 	return errs
 }
 
