@@ -60,6 +60,7 @@ type IRDeployConfig struct {
 // IREntity represents an entity in IR.
 type IREntity struct {
 	Name         string
+	OldName      string // previous entity name (rename hint for the migration engine)
 	NamePlural   string
 	Features     map[string]bool
 	Fields       []IRField

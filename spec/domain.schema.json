@@ -141,6 +141,10 @@
           },
           "type": "array"
         },
+        "old_name": {
+          "description": "Previous entity name — a hint for the migration engine to detect renames",
+          "type": "string"
+        },
         "permissions": {
           "$ref": "#/$defs/EntityPermissions"
         },

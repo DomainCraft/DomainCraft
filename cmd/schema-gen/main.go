@@ -58,22 +58,22 @@ func buildSchema() map[string]any {
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]any{
-					"name":         map[string]any{"type": "string"},
-					"description":  map[string]any{"type": "string"},
-					"version":      map[string]any{"type": "string"},
-					"platform":     map[string]any{"type": "string", "description": "Target platform version (e.g. net9.0, net8.0)"},
+					"name":        map[string]any{"type": "string"},
+					"description": map[string]any{"type": "string"},
+					"version":     map[string]any{"type": "string"},
+					"platform":    map[string]any{"type": "string", "description": "Target platform version (e.g. net9.0, net8.0)"},
 					"multi_tenancy": map[string]any{
 						"$ref": "#/$defs/MultiTenancy",
 					},
 					"cache": map[string]any{
 						"$ref": "#/$defs/CacheConfig",
 					},
-				"cors": map[string]any{
-					"$ref": "#/$defs/CORSConfig",
-				},
-				"deploy": map[string]any{
-					"$ref": "#/$defs/DeployConfig",
-				},
+					"cors": map[string]any{
+						"$ref": "#/$defs/CORSConfig",
+					},
+					"deploy": map[string]any{
+						"$ref": "#/$defs/DeployConfig",
+					},
 				},
 				"required": []string{"name"},
 			},
@@ -126,6 +126,7 @@ func buildSchema() map[string]any {
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]any{
+					"old_name": map[string]any{"type": "string", "description": "Previous entity name — a hint for the migration engine to detect renames"},
 					"features": map[string]any{
 						"type":  "array",
 						"items": map[string]any{"type": "string", "enum": specmeta.Features},

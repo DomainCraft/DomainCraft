@@ -12,6 +12,7 @@ import (
 	"github.com/DomainCraft/DomainCraft/internal/ir"
 	"github.com/DomainCraft/DomainCraft/internal/parser"
 	"github.com/DomainCraft/DomainCraft/internal/renderer"
+	"github.com/DomainCraft/DomainCraft/internal/snapshot"
 	"github.com/DomainCraft/DomainCraft/internal/specmeta"
 	"github.com/DomainCraft/DomainCraft/internal/validator"
 	"github.com/DomainCraft/DomainCraft/pkg/logger"
@@ -25,6 +26,7 @@ var (
 	outputDir      string
 	nonInteractive bool
 	adminBridge    string // --admin [bridge-id]; empty = not requested
+	prune          bool   // --prune: apply migration cleanup without prompting
 )
 
 func Execute() {
@@ -269,7 +271,7 @@ func newGenerateCmd() *cobra.Command {
 			}
 			log.Success("Schema valid (%d entities)", len(schema.Entities))
 
-			resolvedPath, _, err := resolveBridgeInteractive()
+			resolvedPath, bridgeName, err := resolveBridgeInteractive()
 			if err != nil {
 				return err
 			}
@@ -281,13 +283,21 @@ func newGenerateCmd() *cobra.Command {
 				return err
 			}
 
+			// --- Schema snapshot / migration diff ---
+			snapPath := snapshot.SnapshotPath(outputDir)
+			oldSnapshot, err := snapshot.Load(snapPath)
+			if err != nil {
+				return fmt.Errorf("load schema snapshot: %w", err)
+			}
+			migrationDiff := snapshot.ComputeDiff(oldSnapshot, irProject, outputDir)
+
 			log.Info("Rendering via %s", bridgePath)
 			rendererInstance, err := renderer.New(bridgePath, log)
 			if err != nil {
 				return err
 			}
 
-			writtenFiles, err := rendererInstance.Render(irProject, outputDir)
+			writtenFiles, manifest, err := rendererInstance.Render(irProject, outputDir)
 			if err != nil {
 				return err
 			}
@@ -304,9 +314,46 @@ func newGenerateCmd() *cobra.Command {
 				}
 			}
 			if adminBridge != "" {
-				if err := generateAdminPanel(irProject, log); err != nil {
+				adminManifest, err := generateAdminPanel(irProject, log)
+				if err != nil {
 					return err
 				}
+				manifest = append(manifest, adminManifest...)
+			}
+
+			// --- Migration actions: clean up orphaned / renamed files ---
+			// Files written this run must never be touched by cleanup.
+			fresh := make(map[string]bool)
+			for _, f := range manifest {
+				if f.Written {
+					fresh[f.Path] = true
+				}
+			}
+			applied, err := applyMigrationActions(migrationDiff, fresh, log, cmd)
+			if err != nil {
+				return err
+			}
+
+			// --- Smart warning for type changes (manual refactoring report) ---
+			if report := migrationDiff.TypeChangeReport(); report != "" {
+				log.Warn("ACTION REQUIRED — manual refactoring may be needed")
+				fmt.Fprint(cmd.OutOrStdout(), report)
+			}
+
+			// --- Persist the new snapshot ---
+			if !applied {
+				// Cleanup was deferred (non-interactive without --prune). Keep the
+				// previous snapshot so a later --prune run can still find the
+				// orphaned/renamed files.
+				log.Info("Snapshot kept — cleanup pending (re-run with --prune to finish)")
+				return nil
+			}
+			bridgeID := bridgePath
+			if bridgeName != "" {
+				bridgeID = bridgeName
+			}
+			if err := snapshot.Save(snapPath, snapshot.New(bridgeID, irProject, manifest)); err != nil {
+				return fmt.Errorf("save schema snapshot: %w", err)
 			}
 
 			return nil
@@ -315,6 +362,8 @@ func newGenerateCmd() *cobra.Command {
 
 	// --admin [bridge-id] — optional value, defaults to "admin-refine" when flag is present without value.
 	cmd.Flags().StringVar(&adminBridge, "admin", "", "generate admin panel (optionally specify bridge ID, default: admin-refine)")
+	// --prune — automatically delete/rename orphaned files without prompting (CI).
+	cmd.Flags().BoolVar(&prune, "prune", false, "automatically remove/rename orphaned files detected by the migration engine (no prompts)")
 
 	return cmd
 }
@@ -386,7 +435,7 @@ func resolveBridgeInteractive() (string, string, error) {
 	return resolved, entry.Name, nil
 }
 
-func generateAdminPanel(irProject *ir.IRProject, log *logger.Logger) error {
+func generateAdminPanel(irProject *ir.IRProject, log *logger.Logger) ([]renderer.RenderedFile, error) {
 	resolver := bridge.NewResolver(bridge.Default())
 
 	adminID := adminBridge
@@ -396,22 +445,175 @@ func generateAdminPanel(irProject *ir.IRProject, log *logger.Logger) error {
 
 	adminPath, err := resolver.Resolve(adminID)
 	if err != nil {
-		return fmt.Errorf("resolve admin bridge %q: %w", adminID, err)
+		return nil, fmt.Errorf("resolve admin bridge %q: %w", adminID, err)
 	}
 
 	log.Info("Rendering admin panel via %s", adminID)
 	adminRenderer, err := renderer.New(adminPath, log)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	adminFiles, err := adminRenderer.Render(irProject, outputDir)
+	adminFiles, adminManifest, err := adminRenderer.Render(irProject, outputDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	log.Success("Generated %d admin file(s)", len(adminFiles))
-	return nil
+	return adminManifest, nil
+}
+
+// applyMigrationActions handles orphaned file cleanup for entities that were
+// removed or renamed since the last generation. In interactive mode the user
+// is prompted before touching custom (overwrite: false) files. With --prune
+// everything is done automatically; otherwise (non-interactive) a warning is
+// printed and nothing is modified. Files freshly written this run (fresh) are
+// never touched.
+//
+// It returns whether all actions were applied. When cleanup was deferred
+// (non-interactive without --prune) it returns false so the caller keeps the
+// previous snapshot — otherwise orphaned files would be forgotten and a later
+// --prune run could no longer find them.
+func applyMigrationActions(diff *snapshot.Diff, fresh map[string]bool, log *logger.Logger, cmd *cobra.Command) (bool, error) {
+	if diff == nil || diff.IsEmpty() {
+		return true, nil
+	}
+	out := cmd.OutOrStdout()
+
+	applied := true
+	for _, del := range diff.Deleted {
+		if len(del.Files) == 0 {
+			continue
+		}
+		done, err := handleDeletedEntity(del, fresh, log, out)
+		if err != nil {
+			return false, err
+		}
+		applied = applied && done
+	}
+
+	for _, ren := range diff.Renamed {
+		if len(ren.Files) == 0 {
+			continue
+		}
+		done, err := handleRename(ren, fresh, log, out)
+		if err != nil {
+			return false, err
+		}
+		applied = applied && done
+	}
+	return applied, nil
+}
+
+// handleDeletedEntity deletes generated files automatically and asks (or warns)
+// about custom files of a removed entity. Returns false when cleanup was
+// deferred (non-interactive without --prune).
+func handleDeletedEntity(del snapshot.DeletedEntity, fresh map[string]bool, log *logger.Logger, out io.Writer) (bool, error) {
+	selected := make(map[string]bool)
+
+	if prune {
+		for _, f := range del.Files {
+			selected[f.Path] = true
+		}
+	} else if interactive.IsTerminal() {
+		choices := make([]interactive.FileChoice, len(del.Files))
+		for i, f := range del.Files {
+			choices[i] = interactive.FileChoice{Path: f.Path, Label: fileLabel(f)}
+		}
+		picked, err := interactive.PromptDeleteFiles(del.Name, choices)
+		if err != nil {
+			return false, err
+		}
+		for _, p := range picked {
+			selected[p] = true
+		}
+	} else {
+		log.Warn("Entity %q was removed from domain.yaml — orphaned files kept (re-run with --prune to delete):", del.Name)
+		for _, f := range del.Files {
+			fmt.Fprintf(out, "    - %s%s\n", f.Path, customMark(f))
+		}
+		return false, nil
+	}
+
+	for _, f := range del.Files {
+		if !selected[f.Path] || fresh[f.Path] {
+			continue
+		}
+		if err := snapshot.DeleteFile(outputDir, f.Path); err != nil {
+			log.Warn("could not delete %s: %v", f.Path, err)
+			continue
+		}
+		fmt.Fprintf(out, "  ▸ deleted %s\n", f.Path)
+	}
+	return true, nil
+}
+
+// handleRename renames custom files after a prompt and removes stale generated
+// files (they have been regenerated under the new entity name). Returns false
+// when cleanup was deferred (non-interactive without --prune).
+func handleRename(ren snapshot.Rename, fresh map[string]bool, log *logger.Logger, out io.Writer) (bool, error) {
+	selected := make(map[string]bool)
+
+	if prune {
+		for _, f := range ren.Files {
+			selected[f.Path] = true
+		}
+	} else if interactive.IsTerminal() {
+		choices := make([]interactive.FileChoice, len(ren.Files))
+		for i, f := range ren.Files {
+			choices[i] = interactive.FileChoice{Path: f.Path, Label: fileLabel(f)}
+		}
+		picked, err := interactive.PromptRenameFiles(ren.OldName, ren.NewName, choices)
+		if err != nil {
+			return false, err
+		}
+		for _, p := range picked {
+			selected[p] = true
+		}
+	} else {
+		log.Warn("Entity %q was renamed to %q — files kept (re-run with --prune to rename):", ren.OldName, ren.NewName)
+		for _, f := range ren.Files {
+			fmt.Fprintf(out, "    - %s -> %s\n", f.Path, snapshot.RenameRelPath(f.Path, ren.OldName, ren.NewName))
+		}
+		return false, nil
+	}
+
+	for _, f := range ren.Files {
+		if !selected[f.Path] || fresh[f.Path] {
+			continue
+		}
+		if f.Custom {
+			newRel, renamed, err := snapshot.RenameEntityFile(outputDir, f.Path, ren.OldName, ren.NewName)
+			if err != nil {
+				log.Warn("could not rename %s: %v", f.Path, err)
+				continue
+			}
+			if renamed {
+				fmt.Fprintf(out, "  ▸ renamed %s -> %s\n", f.Path, newRel)
+			}
+			continue
+		}
+		// Generated files have been regenerated under the new name — remove the stale copy.
+		if err := snapshot.DeleteFile(outputDir, f.Path); err != nil {
+			log.Warn("could not delete stale generated file %s: %v", f.Path, err)
+			continue
+		}
+		fmt.Fprintf(out, "  ▸ removed stale generated file %s\n", f.Path)
+	}
+	return true, nil
+}
+
+// fileLabel renders a file choice label, annotating developer-owned files.
+func fileLabel(f snapshot.FileRef) string {
+	return f.Path + customMark(f)
+}
+
+// customMark returns a marker suffix for custom (overwrite: false) files.
+func customMark(f snapshot.FileRef) string {
+	if f.Custom {
+		return "  [custom]"
+	}
+	return ""
 }
 
 func loadAndValidate(out io.Writer) (*parser.ParsedSchema, error) {

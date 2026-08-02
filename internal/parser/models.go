@@ -83,6 +83,7 @@ type MultiTenancyConfig struct {
 
 // RawEntity represents an unprocessed entity from YAML
 type RawEntity struct {
+	OldName     string                   `yaml:"old_name" json:"old_name,omitempty"` // hint for the migration engine: previous entity name (rename detection)
 	Features    []string                 `yaml:"features" json:"features,omitempty"`
 	Fields      map[string]string        `yaml:"fields" json:"fields"`
 	FieldOrder  []string                 `yaml:"-" json:"fieldOrder"` // preserved from YAML — not a yaml tag
@@ -131,6 +132,10 @@ func (e *RawEntity) UnmarshalYAML(value *yaml.Node) error {
 		key := keyNode.Value
 
 		switch key {
+		case "old_name":
+			if err := valNode.Decode(&e.OldName); err != nil {
+				return err
+			}
 		case "features":
 			if err := valNode.Decode(&e.Features); err != nil {
 				return err
@@ -160,7 +165,7 @@ func (e *RawEntity) UnmarshalYAML(value *yaml.Node) error {
 				return err
 			}
 		default:
-			return fmt.Errorf("unknown entity key %q; valid keys: features, fields, indexes, permissions, seed", key)
+			return fmt.Errorf("unknown entity key %q; valid keys: old_name, features, fields, indexes, permissions, seed", key)
 		}
 	}
 

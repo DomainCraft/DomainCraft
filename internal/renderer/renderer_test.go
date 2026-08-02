@@ -43,7 +43,7 @@ templates:
 		Name:     "TestProject",
 		Entities: []ir.IREntity{{Name: "User", NamePlural: "Users"}},
 	}
-	written, err := r.Render(project, filepath.Join(tmpDir, "out"))
+	written, _, err := r.Render(project, filepath.Join(tmpDir, "out"))
 	if err != nil {
 		t.Fatalf("Render() error = %v", err)
 	}
@@ -55,6 +55,84 @@ templates:
 	}
 	if _, err := os.Stat(filepath.Join(tmpDir, "out", "nested", "User.txt")); err != nil {
 		t.Fatalf("expected generated file nested/User.txt: %v", err)
+	}
+}
+
+func TestRenderOverwriteFalseScaffoldsOnce(t *testing.T) {
+	tmpDir := t.TempDir()
+	bridgeDir := filepath.Join(tmpDir, "bridge")
+	if err := os.MkdirAll(filepath.Join(bridgeDir, "templates"), 0o755); err != nil {
+		t.Fatalf("mkdir bridge: %v", err)
+	}
+
+	bridgeYAML := []byte(`name: demo
+output_dir: generated
+templates:
+  - for: entity
+    source: templates/entity.tmpl
+    target: "{{ .Entity.Name }}.cs"
+    overwrite: true
+  - for: entity
+    source: templates/service.tmpl
+    target: "{{ .Entity.Name }}Service.cs"
+    overwrite: false
+`)
+	templateBytes := []byte(`{{ .Entity.Name }}`)
+	if err := os.WriteFile(filepath.Join(bridgeDir, "bridge.yaml"), bridgeYAML, 0o644); err != nil {
+		t.Fatalf("write bridge: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(bridgeDir, "templates", "entity.tmpl"), templateBytes, 0o644); err != nil {
+		t.Fatalf("write entity template: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(bridgeDir, "templates", "service.tmpl"), templateBytes, 0o644); err != nil {
+		t.Fatalf("write service template: %v", err)
+	}
+
+	r, err := New(bridgeDir, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	project := &ir.IRProject{
+		Name:     "TestProject",
+		Entities: []ir.IREntity{{Name: "User", NamePlural: "Users"}},
+	}
+	outDir := filepath.Join(tmpDir, "out")
+
+	// First run: both files are written.
+	written, manifest, err := r.Render(project, outDir)
+	if err != nil {
+		t.Fatalf("Render() 1 error = %v", err)
+	}
+	if len(written) != 2 {
+		t.Fatalf("run 1: got %d written files, want 2", len(written))
+	}
+	if len(manifest) != 2 {
+		t.Fatalf("run 1: got %d manifest entries, want 2", len(manifest))
+	}
+
+	// Second run: overwrite:false file is skipped but still in the manifest.
+	written, manifest, err = r.Render(project, outDir)
+	if err != nil {
+		t.Fatalf("Render() 2 error = %v", err)
+	}
+	if len(written) != 1 {
+		t.Fatalf("run 2: got %d written files, want 1 (custom file skipped)", len(written))
+	}
+	var custom *RenderedFile
+	for i := range manifest {
+		if manifest[i].Custom {
+			custom = &manifest[i]
+		}
+	}
+	if custom == nil {
+		t.Fatal("expected a custom file in the manifest")
+	}
+	if custom.Written {
+		t.Error("custom file should be marked Written=false on the second run")
+	}
+	if custom.Path != "UserService.cs" {
+		t.Errorf("custom path = %q, want UserService.cs", custom.Path)
 	}
 }
 

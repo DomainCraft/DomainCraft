@@ -554,3 +554,26 @@ entities:
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+func TestParseOldName(t *testing.T) {
+	yamlData := []byte(`
+project:
+  name: Test
+entities:
+  Item:
+    old_name: Product
+    fields:
+      id: uuid [primary]
+`)
+	schema, err := ParseYAML(yamlData)
+	if err != nil {
+		t.Fatalf("ParseYAML() error = %v", err)
+	}
+	entity := schema.Entities["Item"]
+	if entity == nil {
+		t.Fatal("expected entity Item")
+	}
+	if entity.OldName != "Product" {
+		t.Errorf("OldName = %q, want Product", entity.OldName)
+	}
+}

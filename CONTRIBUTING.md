@@ -70,7 +70,8 @@ domain.yaml --> Parser --> Lexer --> Validator --> IR Builder --> Renderer --> G
 | **Lexer** | `internal/lexer` | `FieldDefinition` — parsed field strings like `"string [required, max:255]"` |
 | **Validator** | `internal/validator` | Validation errors (missing PKs, broken relations, etc.) |
 | **IR Builder** | `internal/ir` | `IRProject` — fully linked graph with bidirectional relations, resolved navigation names |
-| **Renderer** | `internal/renderer` | Files on disk — reads `bridge.yaml`, loads templates, renders IR to output |
+| **Renderer** | `internal/renderer` | Files on disk + file manifest — reads `bridge.yaml`, loads templates, renders IR to output |
+| **Snapshot/Migration** | `internal/snapshot` | `<output>/.domaincraft/snapshot.json` — persists IR + file manifest, diffs the next `domain.yaml`, drives delete/rename/type-change handling |
 
 The **IR (Intermediate Representation)** is the contract between parsing and rendering. Templates receive a fully resolved `IRProject` and need no parsing logic.
 
@@ -128,7 +129,34 @@ templates:
 | `for` | yes | `entity` (per-entity) or `project` (once) |
 | `source` | yes | Path to template file relative to bridge directory |
 | `target` | yes | Output path pattern (supports Go template syntax) |
-| `when` | no | Condition: `hasEnums`, `hasSeed` |
+| `targets` | no | Multiple output path patterns (alternative to `target`) |
+| `when` | no | Condition: `hasSeed`, `hasEnums`, `hasPermissions`, `hasOwnerTokens`, `hasAuth` |
+| `overwrite` | no | `false` = scaffold once (skip if the file exists); default `true`. These files are tracked as **custom** (developer-owned) by the migration engine |
+| `delimiters` | no | Custom template delimiters, e.g. `["<<", ">>"]` — use for bridges generating JSX/TSX where `{{ }}` conflicts with Go templates |
+
+### Template conventions
+
+- Use `{{-` and `-}}` whitespace trimming so output is clean.
+- Feature fields (`createdAt`, `updatedAt`, `createdBy`, `updatedBy`, `deletedAt`, `version`) are auto-injected by features — skip them in field loops with `isFeatureField`.
+- Iterate `range .Entity.Fields` with `if` filters instead of pre-computing slices; prefer clear names over clever control flow.
+- **Split Core (always regenerated) and Custom (`overwrite: false`) code.** Generated logic belongs behind interfaces/base classes; the developer-owned implementation is scaffolded only once. The migration engine protects custom files when entities are deleted, renamed, or change types.
+
+### Schema migration (snapshots)
+
+After every successful `domaincraft generate` the IR plus the file manifest is persisted to `<output>/.domaincraft/snapshot.json`. The next run diffs the new `domain.yaml` against that snapshot:
+
+- **Deleted entities** — generated files are removed; custom files are listed in an interactive multi-select prompt (or a warning in non-interactive mode). Add `--prune` to apply cleanup automatically for CI. Non-interactive runs **without** `--prune` only warn and keep the previous snapshot, so a later `--prune` run can still find the orphaned files.
+- **Renamed entities** — an entity declares its previous name via `old_name`:
+  ```yaml
+  entities:
+    Item:
+      old_name: Product   # rename hint
+      fields: ...
+  ```
+  Custom files are renamed (replacing plural and singular forms in the path).
+- **Field type changes** — the CLI prints a "manual refactoring" report listing changed fields and the custom files that may need fixes.
+
+The snapshot is deterministic (sorted file lists) and language-agnostic. Bridges opt into custom-file protection by declaring `overwrite: false`.
 
 ### Step 3: Create `type_mappings.yaml`
 
@@ -310,6 +338,7 @@ Create a `README.md` in the bridge directory with:
 - Keep naming consistent with the target language's conventions.
 - Add or update tests that cover the generated file set and key content.
 - Document what the bridge generates and what still needs work.
+- Split **Core** (always regenerated) from **Custom** (`overwrite: false`, scaffolded once) code so the migration engine can safely delete/rename files. Put generated logic behind interfaces or `partial` classes and scaffold the developer-owned implementation once.
 
 ### Bridge isolation and language mappings
 
@@ -349,3 +378,5 @@ When reviewing a pull request that touches bridge templates, verify:
 5. Feature fields (audit, soft delete, etc.) are handled in the correct layer (entity, configuration, controller, etc.).
 6. Permissions are wired end-to-end: YAML roles -> IR -> generated authorization attributes/policies.
 7. Documentation is updated to reflect new or changed bridge capabilities.
+8. `overwrite: false` is used only for scaffold-once, developer-owned files, and such files are never overwritten by a later run.
+9. Delete/rename behavior is correct: re-running `generate --prune` after an entity is removed or renamed cleans up only the right files (verify against the snapshot at `<output>/.domaincraft/snapshot.json`).

@@ -1,0 +1,201 @@
+package snapshot
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/DomainCraft/DomainCraft/internal/ir"
+	"github.com/DomainCraft/DomainCraft/internal/renderer"
+)
+
+func TestSaveLoadRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	path := SnapshotPath(dir)
+
+	snap := New("csharp-restful", testProject("Product"), []renderer.RenderedFile{
+		{Path: "src/Domain/Entities/Product.cs", Entity: "Product", Written: true},
+		{Path: "src/Services/ProductService.cs", Entity: "Product", Custom: true, Written: true},
+	})
+
+	if err := Save(path, snap); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("snapshot file not created: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.FormatVersion != FormatVersion {
+		t.Errorf("FormatVersion = %d, want %d", loaded.FormatVersion, FormatVersion)
+	}
+	if len(loaded.Files) != 2 {
+		t.Errorf("got %d files, want 2", len(loaded.Files))
+	}
+	state, ok := loaded.Entities["Product"]
+	if !ok {
+		t.Fatal("expected Product entity in snapshot")
+	}
+	if state.Fields["id"] != "uuid" {
+		t.Errorf("Product.id = %q, want %q", state.Fields["id"], "uuid")
+	}
+}
+
+func TestLoadMissingSnapshotReturnsNil(t *testing.T) {
+	loaded, err := Load(filepath.Join(t.TempDir(), "nope", "snapshot.json"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded != nil {
+		t.Fatal("expected nil snapshot for missing file")
+	}
+}
+
+func TestComputeDiffDeletedEntity(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "src/Domain/Entities/Product.cs")
+	writeTestFile(t, dir, "src/Services/ProductService.cs")
+
+	old := &Snapshot{
+		Entities: map[string]EntityState{"Product": {Fields: map[string]string{"id": "uuid"}}},
+		Files: []renderer.RenderedFile{
+			{Path: "src/Domain/Entities/Product.cs", Entity: "Product"},
+			{Path: "src/Services/ProductService.cs", Entity: "Product", Custom: true},
+			{Path: "src/WebApi/Program.cs"}, // project-level — ignored
+		},
+	}
+	newProject := testProject("User")
+
+	diff := ComputeDiff(old, newProject, dir)
+	if len(diff.Deleted) != 1 {
+		t.Fatalf("got %d deleted entities, want 1", len(diff.Deleted))
+	}
+	del := diff.Deleted[0]
+	if del.Name != "Product" {
+		t.Errorf("deleted name = %q, want Product", del.Name)
+	}
+	if len(del.Files) != 2 {
+		t.Fatalf("got %d orphaned files, want 2", len(del.Files))
+	}
+	if !del.Files[0].Custom && !del.Files[1].Custom {
+		t.Error("expected one custom file in orphaned set")
+	}
+}
+
+func TestComputeDiffRenameAndTypeChange(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "src/Domain/Entities/Product.cs")
+	writeTestFile(t, dir, "src/Services/ProductService.cs")
+
+	old := &Snapshot{
+		Entities: map[string]EntityState{
+			"Product": {Fields: map[string]string{"id": "uuid", "name": "string"}},
+		},
+		Files: []renderer.RenderedFile{
+			{Path: "src/Domain/Entities/Product.cs", Entity: "Product"},
+			{Path: "src/Services/ProductService.cs", Entity: "Product", Custom: true},
+		},
+	}
+
+	// Product -> Item (via old_name) and id type changed uuid -> int.
+	project := &ir.IRProject{
+		Entities: []ir.IREntity{
+			{
+				Name:       "Item",
+				OldName:    "Product",
+				NamePlural: "Items",
+				Fields: []ir.IRField{
+					{Name: "id", DatabaseType: "int", IsPrimary: true},
+					{Name: "name", DatabaseType: "string"},
+				},
+			},
+		},
+	}
+
+	diff := ComputeDiff(old, project, dir)
+	if len(diff.Renamed) != 1 {
+		t.Fatalf("got %d renames, want 1", len(diff.Renamed))
+	}
+	ren := diff.Renamed[0]
+	if ren.OldName != "Product" || ren.NewName != "Item" {
+		t.Errorf("rename = %q -> %q, want Product -> Item", ren.OldName, ren.NewName)
+	}
+	if len(diff.Deleted) != 0 {
+		t.Errorf("got %d deleted entities, want 0", len(diff.Deleted))
+	}
+	if len(diff.TypeChanges) != 1 {
+		t.Fatalf("got %d type changes, want 1", len(diff.TypeChanges))
+	}
+	tc := diff.TypeChanges[0]
+	if tc.Entity != "Item" || tc.Field != "id" || tc.OldType != "uuid" || tc.NewType != "int" {
+		t.Errorf("type change = %+v, want Item.id uuid->int", tc)
+	}
+	if len(tc.CustomFiles) != 1 || tc.CustomFiles[0] != "src/Services/ProductService.cs" {
+		t.Errorf("custom files = %v, want [src/Services/ProductService.cs]", tc.CustomFiles)
+	}
+}
+
+func TestRenameRelPath(t *testing.T) {
+	tests := []struct {
+		rel, old, new, want string
+	}{
+		{"src/Services/ProductService.cs", "Product", "Item", "src/Services/ItemService.cs"},
+		{"src/WebApi/Controllers/ProductsController.cs", "Product", "Item", "src/WebApi/Controllers/ItemsController.cs"},
+		{"src/Domain/Entities/Product.cs", "Product", "Item", "src/Domain/Entities/Item.cs"},
+		// irregular plural (Category -> Categories)
+		{"src/WebApi/Controllers/CategoriesController.cs", "Category", "Item", "src/WebApi/Controllers/ItemsController.cs"},
+		// no entity name in path -> unchanged
+		{"src/Shared/Constants.cs", "Product", "Item", "src/Shared/Constants.cs"},
+	}
+	for _, tt := range tests {
+		if got := RenameRelPath(tt.rel, tt.old, tt.new); got != tt.want {
+			t.Errorf("RenameRelPath(%q, %q, %q) = %q, want %q", tt.rel, tt.old, tt.new, got, tt.want)
+		}
+	}
+}
+
+func TestDeleteFileAndRenameEntityFile(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "src/Services/ProductService.cs")
+
+	if _, renamed, err := RenameEntityFile(dir, "src/Services/ProductService.cs", "Product", "Item"); err != nil {
+		t.Fatalf("RenameEntityFile() error = %v", err)
+	} else if !renamed {
+		t.Fatal("expected file to be renamed")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "src", "Services", "ItemService.cs")); err != nil {
+		t.Fatalf("renamed file missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "src", "Services", "ProductService.cs")); err == nil {
+		t.Error("old file still exists after rename")
+	}
+
+	if err := DeleteFile(dir, "src/Services/ItemService.cs"); err != nil {
+		t.Fatalf("DeleteFile() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "src", "Services", "ItemService.cs")); err == nil {
+		t.Error("file still exists after delete")
+	}
+}
+
+func testProject(entityName string) *ir.IRProject {
+	return &ir.IRProject{
+		Entities: []ir.IREntity{
+			{Name: entityName, NamePlural: entityName + "s", Fields: []ir.IRField{{Name: "id", DatabaseType: "uuid", IsPrimary: true}}},
+		},
+	}
+}
+
+func writeTestFile(t *testing.T, root, rel string) {
+	t.Helper()
+	abs := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(abs, []byte("// generated\n"), 0o644); err != nil {
+		t.Fatalf("write %s: %v", rel, err)
+	}
+}

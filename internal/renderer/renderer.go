@@ -248,9 +248,9 @@ func (r *Renderer) getBridgeSpecificFuncs() (map[string]interface{}, error) {
 	return bridgeFuncs, nil
 }
 
-func (r *Renderer) Render(project *ir.IRProject, outputDir string) ([]string, error) {
+func (r *Renderer) Render(project *ir.IRProject, outputDir string) ([]string, []RenderedFile, error) {
 	if project == nil {
-		return nil, fmt.Errorf("IR project is nil")
+		return nil, nil, fmt.Errorf("IR project is nil")
 	}
 	if outputDir == "" {
 		outputDir = r.config.OutputDir
@@ -258,7 +258,7 @@ func (r *Renderer) Render(project *ir.IRProject, outputDir string) ([]string, er
 
 	funcMap, err := r.buildFuncMap()
 	if err != nil {
-		return nil, fmt.Errorf("build template functions: %w", err)
+		return nil, nil, fmt.Errorf("build template functions: %w", err)
 	}
 
 	// Resolve package versions once — avoids repeated HTTP requests per template.
@@ -271,15 +271,16 @@ func (r *Renderer) Render(project *ir.IRProject, outputDir string) ([]string, er
 		helperPath := filepath.Join(r.bridgeDir, r.config.Helpers)
 		helperBytes, err := os.ReadFile(helperPath)
 		if err != nil {
-			return nil, fmt.Errorf("read helpers %s: %w", r.config.Helpers, err)
+			return nil, nil, fmt.Errorf("read helpers %s: %w", r.config.Helpers, err)
 		}
 		helpersTemplate, err = r.applyDelimiters(template.New("helpers").Funcs(funcMap)).Parse(string(helperBytes))
 		if err != nil {
-			return nil, fmt.Errorf("parse helpers %s: %w", r.config.Helpers, err)
+			return nil, nil, fmt.Errorf("parse helpers %s: %w", r.config.Helpers, err)
 		}
 	}
 
 	writtenFiles := make([]string, 0)
+	manifest := make([]RenderedFile, 0)
 	for _, spec := range r.config.Templates {
 		// Check if template should be rendered based on "When" condition
 		if !r.shouldRender(spec, project, packages) {
@@ -289,7 +290,7 @@ func (r *Renderer) Render(project *ir.IRProject, outputDir string) ([]string, er
 		sourcePath := filepath.Join(r.bridgeDir, spec.Source)
 		tplBytes, err := os.ReadFile(sourcePath)
 		if err != nil {
-			return nil, fmt.Errorf("read template %s: %w", spec.Source, err)
+			return nil, nil, fmt.Errorf("read template %s: %w", spec.Source, err)
 		}
 
 		tplName := filepath.Base(spec.Source)
@@ -298,19 +299,19 @@ func (r *Renderer) Render(project *ir.IRProject, outputDir string) ([]string, er
 			// Clone helpers so all named templates are available
 			parsedTemplate, err = helpersTemplate.Clone()
 			if err != nil {
-				return nil, fmt.Errorf("clone helpers for %s: %w", spec.Source, err)
+				return nil, nil, fmt.Errorf("clone helpers for %s: %w", spec.Source, err)
 			}
 			parsedTemplate, err = r.applyDelimiters(parsedTemplate.New(tplName)).Parse(string(tplBytes))
 		} else {
 			parsedTemplate, err = r.applyDelimiters(template.New(tplName).Funcs(funcMap)).Parse(string(tplBytes))
 		}
 		if err != nil {
-			return nil, fmt.Errorf("parse template %s: %w", spec.Source, err)
+			return nil, nil, fmt.Errorf("parse template %s: %w", spec.Source, err)
 		}
 
 		contexts, err := r.renderContexts(spec.For, project, packages)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		for _, context := range contexts {
@@ -319,49 +320,73 @@ func (r *Renderer) Render(project *ir.IRProject, outputDir string) ([]string, er
 				continue
 			}
 
+			entityName := ""
+			if context.Entity != nil {
+				entityName = context.Entity.Name
+			}
+
 			for _, targetPattern := range spec.TargetPatterns() {
 				renderedTarget, err := renderTemplateString(targetPattern, context, funcMap)
 				if err != nil {
-					return nil, fmt.Errorf("render target path: %w", err)
+					return nil, nil, fmt.Errorf("render target path: %w", err)
 				}
 
 				absoluteTarget := filepath.Join(outputDir, filepath.FromSlash(renderedTarget))
 				absOutput, err := filepath.Abs(outputDir)
 				if err != nil {
-					return nil, fmt.Errorf("resolve output directory: %w", err)
+					return nil, nil, fmt.Errorf("resolve output directory: %w", err)
 				}
 				absTarget, err := filepath.Abs(absoluteTarget)
 				if err != nil {
-					return nil, fmt.Errorf("resolve target path: %w", err)
+					return nil, nil, fmt.Errorf("resolve target path: %w", err)
 				}
 				if !strings.HasPrefix(absTarget, absOutput+string(filepath.Separator)) {
-					return nil, fmt.Errorf("template target path escapes output directory: %s", renderedTarget)
+					return nil, nil, fmt.Errorf("template target path escapes output directory: %s", renderedTarget)
+				}
+
+				relPath := filepath.ToSlash(renderedTarget)
+				record := RenderedFile{
+					Path:    relPath,
+					Entity:  entityName,
+					Custom:  spec.IsCustom(),
+					Written: true,
+				}
+
+				// Scaffold semantics: overwrite: false files are created only once.
+				// The developer owns them afterwards, so they survive regeneration.
+				if spec.IsCustom() {
+					if _, statErr := os.Stat(absoluteTarget); statErr == nil {
+						record.Written = false
+						manifest = append(manifest, record)
+						continue
+					}
 				}
 
 				if err := os.MkdirAll(filepath.Dir(absoluteTarget), 0o755); err != nil {
-					return nil, fmt.Errorf("create output dir: %w", err)
+					return nil, nil, fmt.Errorf("create output dir: %w", err)
 				}
 
 				file, err := os.Create(absoluteTarget)
 				if err != nil {
-					return nil, fmt.Errorf("create output file: %w", err)
+					return nil, nil, fmt.Errorf("create output file: %w", err)
 				}
 
 				if err := parsedTemplate.Execute(file, context); err != nil {
 					_ = file.Close()
 					_ = os.Remove(absoluteTarget)
-					return nil, fmt.Errorf("execute template: %w", err)
+					return nil, nil, fmt.Errorf("execute template: %w", err)
 				}
 				if err := file.Close(); err != nil {
 					_ = os.Remove(absoluteTarget)
-					return nil, err
+					return nil, nil, err
 				}
 				writtenFiles = append(writtenFiles, absoluteTarget)
+				manifest = append(manifest, record)
 			}
 		}
 	}
 
-	return writtenFiles, nil
+	return writtenFiles, manifest, nil
 }
 
 func (r *Renderer) shouldRender(spec TemplateSpec, project *ir.IRProject, packages map[string]string) bool {

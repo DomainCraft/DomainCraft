@@ -29,6 +29,7 @@ type ParsedSchema struct {
 // ParsedEntity represents a fully parsed entity
 type ParsedEntity struct {
 	Name        string
+	OldName     string // previous entity name (rename hint for the migration engine)
 	NamePlural  string // auto-generated plural form
 	Features    map[string]bool
 	Fields      map[string]*ParsedField
@@ -128,6 +129,7 @@ func (p *Parser) Parse() (*ParsedSchema, error) {
 func (p *Parser) parseEntity(name string, raw RawEntity) (*ParsedEntity, error) {
 	entity := &ParsedEntity{
 		Name:       name,
+		OldName:    raw.OldName,
 		NamePlural: textutil.Pluralize(name),
 		Features:   make(map[string]bool),
 		Fields:     make(map[string]*ParsedField),

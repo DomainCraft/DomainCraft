@@ -168,3 +168,65 @@ func PromptGenerateAdmin() (bool, error) {
 	}
 	return generate, nil
 }
+
+// FileChoice is a selectable file with a display label.
+type FileChoice struct {
+	Path  string // value returned when selected
+	Label string // display text (may annotate e.g. "[custom]")
+}
+
+// PromptDeleteFiles asks which orphaned files of a deleted entity should be
+// removed. Returns the selected relative paths (empty = keep everything).
+func PromptDeleteFiles(entityName string, files []FileChoice) ([]string, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+	options := make([]huh.Option[string], len(files))
+	preselected := make([]string, 0, len(files))
+	for i, f := range files {
+		options[i] = huh.NewOption(f.Label, f.Path)
+		preselected = append(preselected, f.Path)
+	}
+	selected := preselected
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewMultiSelect[string]().
+				Title(fmt.Sprintf("Entity %q was removed from domain.yaml", entityName)).
+				Description("The following files are no longer generated. Select files to delete:").
+				Options(options...).
+				Value(&selected),
+		),
+	)
+	if err := form.Run(); err != nil {
+		return nil, err
+	}
+	return selected, nil
+}
+
+// PromptRenameFiles asks which files of a renamed entity should be renamed.
+// Returns the selected relative paths (empty = keep everything).
+func PromptRenameFiles(oldName, newName string, files []FileChoice) ([]string, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+	options := make([]huh.Option[string], len(files))
+	preselected := make([]string, 0, len(files))
+	for i, f := range files {
+		options[i] = huh.NewOption(f.Label, f.Path)
+		preselected = append(preselected, f.Path)
+	}
+	selected := preselected
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewMultiSelect[string]().
+				Title(fmt.Sprintf("Entity %q was renamed to %q", oldName, newName)).
+				Description("Select files to rename (old name -> new name in the path):").
+				Options(options...).
+				Value(&selected),
+		),
+	)
+	if err := form.Run(); err != nil {
+		return nil, err
+	}
+	return selected, nil
+}

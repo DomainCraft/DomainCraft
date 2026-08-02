@@ -57,6 +57,7 @@ func Build(schema *parser.ParsedSchema) (*IRProject, error) {
 
 		irEntity := IREntity{
 			Name:         sourceEntity.Name,
+			OldName:      sourceEntity.OldName,
 			NamePlural:   sourceEntity.NamePlural,
 			Features:     copyFeatureMap(sourceEntity.Features),
 			Fields:       make([]IRField, 0, len(sourceEntity.FieldOrder)),

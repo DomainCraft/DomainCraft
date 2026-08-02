@@ -105,6 +105,8 @@ domaincraft validate --domain domain.yaml
 
 ```
 domain.yaml --> Parser --> Lexer --> Validator --> IR Builder --> Renderer --> Generated Code
+                                                                    |                 |
+                                                                    +-----> Snapshot <--+
 ```
 
 1. **Parser** reads your YAML and builds a structured schema
@@ -112,6 +114,7 @@ domain.yaml --> Parser --> Lexer --> Validator --> IR Builder --> Renderer --> G
 3. **Validator** catches logical errors (missing primary keys, broken relations, invalid configurations)
 4. **IR Builder** creates a fully linked intermediate representation with bidirectional relations
 5. **Renderer** applies bridge templates to the IR and writes files to disk
+6. **Snapshot** persists the domain model + file manifest to `<output>/.domaincraft/snapshot.json`; the next run diffs your updated `domain.yaml` against it so renames and deletions are handled safely (see [Schema Migration](#schema-migration))
 
 The **Intermediate Representation (IR)** is the key design decision. It's a language-agnostic graph of your domain that templates consume. This means the core never needs to know about C#, Java, TypeScript, or any other language -- bridges handle all language-specific concerns.
 
@@ -201,6 +204,30 @@ seed:
   - { name: "Books", slug: "books", isActive: true }
 ```
 
+## Schema Migration
+
+DomainCraft tracks the *history of your domain model*, not the generated code. After every `domaincraft generate` it stores a snapshot at `<output>/.domaincraft/snapshot.json`. When you change `domain.yaml` and generate again, it diffs the two versions and handles the consequences:
+
+- **Renamed entities** — add `old_name` to tell DomainCraft an entity was renamed (not deleted + recreated):
+
+  ```yaml
+  entities:
+    Item:
+      old_name: Product   # rename hint
+      fields: ...
+  ```
+
+- **Deleted entities** — orphaned generated files are removed; developer-owned files (`overwrite: false`) are shown in an interactive prompt.
+- **Field type changes** — a "manual refactoring" report lists the changed fields and files that may need fixes.
+
+Run with `--prune` to apply all cleanup automatically without prompts (CI-friendly):
+
+```bash
+domaincraft generate --prune
+```
+
+Without `--prune`, non-interactive runs only print warnings and keep the previous snapshot, so a later `--prune` run can still find the orphaned files.
+
 ## Bridge System
 
 A **bridge** is a directory containing Go templates and configuration that tells DomainCraft how to generate code for a specific language and framework. Bridges are completely decoupled from the core -- you can create your own without modifying any Go code.
@@ -243,26 +270,31 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for a complete step-by-step guide on cr
 ```
 DomainCraft/
 ├── cmd/
-│   ├── parser/             # CLI entry point (Cobra)
-│   │   ├── main.go
-│   │   └── commands.go     # new, validate, generate, bridges commands
-│   └── schema-gen/         # JSON schema generator for IDE autocomplete
+│   ├── domaincraft/         # CLI entry point (Cobra): new, validate, generate, bridges
+│   ├── schema-gen/          # JSON schema generator for IDE autocomplete
+│   ├── specmeta-json/       # Emits specmeta constants as JSON (used by GUI type generation)
+│   └── wasm-validator/      # Go WASM entry point exposing the validator to the GUI
 ├── internal/
-│   ├── parser/             # YAML parsing -> ParsedSchema
-│   ├── lexer/              # Field string parsing -> FieldDefinition
-│   ├── validator/          # Logical consistency checks
-│   ├── ir/                 # Intermediate Representation builder
-│   ├── renderer/           # Template rendering engine
-│   ├── bridge/             # Bridge registry and resolver
-│   └── interactive/        # Interactive CLI prompts (huh)
+│   ├── parser/              # YAML parsing -> ParsedSchema
+│   ├── lexer/               # Field string parsing -> FieldDefinition
+│   ├── validator/           # Logical consistency checks
+│   ├── ir/                  # Intermediate Representation builder
+│   ├── renderer/            # Template rendering engine + file manifest
+│   ├── snapshot/            # Schema snapshot / migration engine
+│   ├── bridge/              # Bridge registry and resolver
+│   ├── packages/            # Package version registry resolution
+│   ├── specmeta/            # Single source of truth for allowed types/features/databases
+│   ├── interactive/         # Interactive CLI prompts (huh)
+│   └── testutil/            # Shared test helpers
 ├── scripts/
-│   └── install.sh          # One-liner installer
+│   └── install.sh           # One-liner installer
 ├── pkg/
-│   └── logger/             # Console output formatting
+│   ├── logger/              # Console output formatting
+│   └── textutil/            # Identifier splitting, snake_case column names
 ├── spec/
-│   └── domain.schema.json  # JSON Schema for domain.yaml (auto-generated)
+│   └── domain.schema.json   # JSON Schema for domain.yaml (auto-generated)
 ├── examples/
-│   └── domain.yaml         # E-commerce example
+│   └── domain.yaml          # E-commerce example
 ├── Makefile
 └── CONTRIBUTING.md
 ```
@@ -270,20 +302,23 @@ DomainCraft/
 ## CLI Reference
 
 ```
-domaincraft new              # Create a new project (interactive wizard)
-domaincraft generate         # Generate code from domain.yaml
-domaincraft validate         # Validate domain.yaml
-domaincraft bridges          # List available bridges
+domaincraft new / init     # Create a new project (interactive wizard)
+domaincraft generate       # Generate code from domain.yaml
+domaincraft validate       # Validate domain.yaml
+domaincraft bridges        # List available bridges
 
 # Flags
---domain, -d     Path to domain.yaml (default: domain.yaml)
---bridge, -b     Bridge ID, path, or owner/repo
---output, -o     Output directory (default: generated)
+--domain, -d      Path to domain.yaml (default: domain.yaml)
+--bridge, -b      Bridge ID, path, or owner/repo
+--output, -o      Output directory (default: generated)
+--admin           Generate an admin panel (optional bridge ID, default: admin-refine)
+--prune           Apply migration cleanup automatically without prompts (CI)
 --non-interactive  Disable interactive prompts (for CI/scripts)
---name           Project name (for 'new' command)
---database       Database type (postgresql, mysql, sqlite, mssql, mongodb)
---auth           Auth type (jwt, none)
---api-style      API style (rest, graphql, grpc)
+--name            Project name (for 'new' command)
+--version         Project version (for 'new' command)
+--database        Database type (postgresql, mysql, sqlite, mssql, mongodb)
+--auth            Auth type (jwt, none)
+--api-style       API style (rest, graphql, grpc)
 ```
 
 ## For Developers
