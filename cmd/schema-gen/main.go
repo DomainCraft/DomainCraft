@@ -176,6 +176,7 @@ func buildSchema() map[string]any {
 			"EntityDefinition": map[string]any{
 				"title":                "EntityDefinition",
 				"type":                 "object",
+				"description":          "An entity. Valid keys: old_name, features, fields, indexes, permissions, seed. There is no `relations:` key — relations are declared as fields of type `relation(Target)` (see the fields description).",
 				"additionalProperties": false,
 				"properties": map[string]any{
 					"old_name": map[string]any{"type": "string", "description": "Previous entity name — a hint for the migration engine to detect renames"},
@@ -184,7 +185,8 @@ func buildSchema() map[string]any {
 						"items": map[string]any{"type": "string", "enum": specmeta.Features},
 					},
 					"fields": map[string]any{
-						"type":                 "object",
+						"type":        "object",
+						"description": "Field definitions. Each value is a definition string: `type [modifiers]` (e.g. `string [required, max:255]`). Relations are fields, not a separate key: `relation(Target) [many]` for many-to-many, `relation(Target) [required, on_delete:cascade]`, `relation(Target) [optional, on_delete:set_null]`. `on_delete` accepts cascade|restrict|set_null|no_action. Do not put a space after `:` inside the definition string (`default:5`, not `default: 5`); quoted string defaults are allowed (`default:\"pending\"`).",
 						"additionalProperties": map[string]any{"type": "string"},
 					},
 					"indexes": map[string]any{

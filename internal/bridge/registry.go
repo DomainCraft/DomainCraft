@@ -20,10 +20,10 @@ var DefaultRegistry = []RegistryEntry{
 		GitHub:      "DomainCraft/domaincraft-bridge-csharp",
 	},
 	{
-		ID:          "admin-refine",
-		Name:        "Admin Panel (Refine)",
-		Description: "React admin panel with Refine.dev + Ant Design + Vite",
-		Language:    "TypeScript",
+		ID:          "admin-alpine",
+		Name:        "Admin Panel (Alpine.js)",
+		Description: "Admin panel with Alpine.js + 0build UIkit",
+		Language:    "HTML",
 		GitHub:      "DomainCraft/domaincraft-bridge-admin",
 	},
 }

@@ -317,7 +317,7 @@ func newGenerateCmd() *cobra.Command {
 			} else if adminBridge == "" && !cmd.Flags().Changed("admin") && interactive.IsTerminal() {
 				generate, _ := interactive.PromptGenerateAdmin()
 				if generate {
-					adminBridge = "admin-refine"
+					adminBridge = "admin-alpine"
 				}
 			}
 			if adminBridge != "" {
@@ -376,8 +376,8 @@ func newGenerateCmd() *cobra.Command {
 		},
 	}
 
-	// --admin [bridge-id] — optional value, defaults to "admin-refine" when flag is present without value.
-	cmd.Flags().StringVar(&adminBridge, "admin", "", "generate admin panel (optionally specify bridge ID, default: admin-refine)")
+	// --admin [bridge-id] — optional value, defaults to "admin-alpine" when flag is present without value.
+	cmd.Flags().StringVar(&adminBridge, "admin", "", "generate admin panel (optionally specify bridge ID, default: admin-alpine)")
 	// --prune — automatically delete/rename orphaned files without prompting (CI).
 	cmd.Flags().BoolVar(&prune, "prune", false, "automatically remove/rename orphaned files detected by the migration engine (no prompts)")
 	// --migrate — after generation, run the bridge's declared database-migration commands.
@@ -460,7 +460,7 @@ func generateAdminPanel(irProject *ir.IRProject, log *logger.Logger) ([]renderer
 
 	adminID := adminBridge
 	if adminID == "" {
-		adminID = "admin-refine"
+		adminID = "admin-alpine"
 	}
 
 	adminPath, err := resolver.Resolve(adminID)

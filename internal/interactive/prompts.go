@@ -159,7 +159,7 @@ func PromptGenerateAdmin() (bool, error) {
 		huh.NewGroup(
 			huh.NewConfirm().
 				Title("Generate admin panel?").
-				Description("Create a Refine.dev admin panel (React + Ant Design) for managing your data").
+				Description("Create an Alpine.js admin panel (single-page HTML) for managing your data").
 				Value(&generate),
 		),
 	)
