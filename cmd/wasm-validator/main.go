@@ -8,6 +8,7 @@ import (
 
 	"github.com/DomainCraft/DomainCraft/internal/lexer"
 	"github.com/DomainCraft/DomainCraft/internal/parser"
+	"github.com/DomainCraft/DomainCraft/internal/specmeta"
 	"github.com/DomainCraft/DomainCraft/internal/validator"
 )
 
@@ -30,12 +31,17 @@ func main() {
 	js.Global().Set("goValidate", js.FuncOf(validate))
 	js.Global().Set("goParseField", js.FuncOf(parseField))
 	js.Global().Set("goParseDomain", js.FuncOf(parseDomain))
+	js.Global().Set("goSpecmeta", js.FuncOf(specmetaFunc))
 	js.Global().Set("goVersion", js.FuncOf(versionFunc))
 	<-c
 }
 
 func versionFunc(_ js.Value, _ []js.Value) interface{} {
 	return version
+}
+
+func specmetaFunc(_ js.Value, _ []js.Value) interface{} {
+	return marshal(specmeta.SpecmetaJSON())
 }
 
 func validate(_ js.Value, args []js.Value) interface{} {

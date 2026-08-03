@@ -287,8 +287,7 @@ DomainCraft/
 ├── cmd/
 │   ├── domaincraft/         # CLI entry point (Cobra): new, validate, generate, bridges
 │   ├── schema-gen/          # JSON schema generator for IDE autocomplete
-│   ├── specmeta-json/       # Emits specmeta constants as JSON (used by GUI type generation)
-│   └── wasm-validator/      # Go WASM entry point exposing the validator to the GUI
+│   └── wasm-validator/      # Go WASM entry point exposing the validator + spec to the GUI
 ├── internal/
 │   ├── parser/              # YAML parsing -> ParsedSchema
 │   ├── lexer/               # Field string parsing -> FieldDefinition
