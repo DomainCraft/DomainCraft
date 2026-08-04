@@ -181,6 +181,43 @@ func TestDeleteFileAndRenameEntityFile(t *testing.T) {
 	}
 }
 
+func TestComputeDiffNamespaceRename(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "src/Application/Services/UserService.cs")
+	writeTestFile(t, dir, "src/WebApi/Program.cs")
+	// Custom file carries the OLD root namespace; Program.cs is overwritten by the
+	// generator so it gets the new namespace and must NOT be flagged.
+	abs := filepath.Join(dir, "src", "Application", "Services", "UserService.cs")
+	oldContent := "namespace EscrowPay.Application.Services;\n"
+	if err := os.WriteFile(abs, []byte(oldContent), 0o644); err != nil {
+		t.Fatalf("write custom service: %v", err)
+	}
+
+	old := &Snapshot{
+		ProjectNamespace: "EscrowPay",
+		Files: []renderer.RenderedFile{
+			{Path: "src/Application/Services/UserService.cs", Entity: "User", Custom: true, Written: true},
+			{Path: "src/WebApi/Program.cs", Written: true},
+		},
+	}
+
+	project := testProject("User")
+	project.Name = "EscrowApi"
+	diff := ComputeDiff(old, project, dir)
+	if diff.NamespaceRename == nil {
+		t.Fatal("expected a namespace rename warning")
+	}
+	if diff.NamespaceRename.OldNamespace != "EscrowPay" || diff.NamespaceRename.NewNamespace != "EscrowApi" {
+		t.Errorf("mismatch namespaces = %q -> %q", diff.NamespaceRename.OldNamespace, diff.NamespaceRename.NewNamespace)
+	}
+	if len(diff.NamespaceRename.Files) != 1 || diff.NamespaceRename.Files[0] != "src/Application/Services/UserService.cs" {
+		t.Errorf("affected files = %v, want only the custom UserService.cs", diff.NamespaceRename.Files)
+	}
+	if diff.NamespaceRenameReport() == "" {
+		t.Error("NamespaceRenameReport() should be non-empty")
+	}
+}
+
 func testProject(entityName string) *ir.IRProject {
 	return &ir.IRProject{
 		Entities: []ir.IREntity{

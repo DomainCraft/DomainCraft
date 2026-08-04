@@ -46,6 +46,7 @@ type Snapshot struct {
 	FormatVersion int                     `json:"format_version"`
 	Bridge        string                  `json:"bridge"`
 	CreatedAt     string                  `json:"created_at"`
+	ProjectNamespace string               `json:"project_namespace,omitempty"` // pascal-cased project name used as the C#/other root namespace
 	Files         []renderer.RenderedFile `json:"files"`
 	Entities      map[string]EntityState  `json:"entities"`
 }
@@ -98,11 +99,12 @@ func New(bridge string, project *ir.IRProject, files []renderer.RenderedFile) *S
 		entities[e.Name] = EntityState{OldName: e.OldName, Fields: fields}
 	}
 	return &Snapshot{
-		FormatVersion: FormatVersion,
-		Bridge:        bridge,
-		CreatedAt:     time.Now().UTC().Format(time.RFC3339),
-		Files:         files,
-		Entities:      entities,
+		FormatVersion:    FormatVersion,
+		Bridge:           bridge,
+		CreatedAt:        time.Now().UTC().Format(time.RFC3339),
+		ProjectNamespace: textutil.PascalCase(project.Name),
+		Files:            files,
+		Entities:         entities,
 	}
 }
 
@@ -135,16 +137,28 @@ type TypeChange struct {
 	CustomFiles []string // custom (overwrite: false) file paths for the entity that still exist
 }
 
+// NamespaceMismatch reports custom (overwrite: false) files that still reference
+// the previous project's root namespace after the project was renamed. The bridge
+// regenerates only the generated (overwrite: true) files with the new namespace;
+// developer-owned files keep their old `namespace OldProject.*` and would no longer
+// compile. The files listed still exist on disk and contain the old namespace token.
+type NamespaceMismatch struct {
+	OldNamespace string   // previous pascal-cased project name
+	NewNamespace string   // current pascal-cased project name
+	Files        []string // relative paths of custom files still containing the old namespace
+}
+
 // Diff is the computed difference between the old snapshot and the current IR.
 type Diff struct {
-	Deleted     []DeletedEntity
-	Renamed     []Rename
-	TypeChanges []TypeChange
+	Deleted       []DeletedEntity
+	Renamed       []Rename
+	TypeChanges   []TypeChange
+	NamespaceRename *NamespaceMismatch
 }
 
 // IsEmpty reports whether the diff contains nothing actionable.
 func (d *Diff) IsEmpty() bool {
-	return len(d.Deleted) == 0 && len(d.Renamed) == 0 && len(d.TypeChanges) == 0
+	return len(d.Deleted) == 0 && len(d.Renamed) == 0 && len(d.TypeChanges) == 0 && d.NamespaceRename == nil
 }
 
 // ComputeDiff compares an old snapshot against the current IR project.
@@ -231,7 +245,75 @@ func ComputeDiff(old *Snapshot, project *ir.IRProject, outputDir string) *Diff {
 		return diff.TypeChanges[i].Field < diff.TypeChanges[j].Field
 	})
 
+	// Project rename: custom (overwrite: false) files carry the old root namespace
+	// because they are scaffolded once. Detect them by scanning their content so the
+	// developer gets an actionable list instead of a compile error later.
+	currentNamespace := textutil.PascalCase(project.Name)
+	if old.ProjectNamespace != "" && old.ProjectNamespace != currentNamespace {
+		diff.NamespaceRename = detectNamespaceMismatch(outputDir, old, old.ProjectNamespace, currentNamespace)
+	}
+
 	return diff
+}
+
+// detectNamespaceMismatch finds custom files from the old snapshot (still present
+// on disk) whose content references the old root namespace.
+func detectNamespaceMismatch(outputDir string, old *Snapshot, oldNamespace, newNamespace string) *NamespaceMismatch {
+	var affected []string
+	for _, f := range old.Files {
+		if !f.Custom {
+			continue
+		}
+		abs := filepath.Join(outputDir, filepath.FromSlash(f.Path))
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			continue
+		}
+		if referencesNamespace(string(data), oldNamespace) {
+			affected = append(affected, f.Path)
+		}
+	}
+	if len(affected) == 0 {
+		return nil
+	}
+	sort.Strings(affected)
+	return &NamespaceMismatch{OldNamespace: oldNamespace, NewNamespace: newNamespace, Files: affected}
+}
+
+// referencesNamespace reports whether s declares the given root namespace, e.g.
+// `namespace EscrowPay...` or `namespace EscrowPay;`.
+func referencesNamespace(s, namespace string) bool {
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "namespace ") {
+			continue
+		}
+		rest := strings.TrimPrefix(line, "namespace ")
+		rest = strings.TrimSuffix(rest, ";")
+		rest = strings.TrimSpace(rest)
+		if rest == namespace || strings.HasPrefix(rest, namespace+".") {
+			return true
+		}
+	}
+	return false
+}
+
+// NamespaceRenameReport returns a human-readable report for the project-namespace
+// mismatch in the diff, or an empty string when there is none.
+func (d *Diff) NamespaceRenameReport() string {
+	n := d.NamespaceRename
+	if n == nil || len(n.Files) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "You renamed the project from %q to %q. Developer-owned custom files\n", n.OldNamespace, n.NewNamespace)
+	b.WriteString("(overwrite: false) still declare the old root namespace and will no longer compile:\n\n")
+	for i, f := range n.Files {
+		fmt.Fprintf(&b, "%d. %s\n", i+1, f)
+	}
+	b.WriteString("\nReplace `namespace "+n.OldNamespace+".` with `namespace "+n.NewNamespace+".` in each file ")
+	b.WriteString("(or run a find-and-replace across your project).\n")
+	return b.String()
 }
 
 // customEntityFiles returns the relative paths of custom (overwrite: false)

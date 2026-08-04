@@ -184,6 +184,12 @@ func newGenerateCmd() *cobra.Command {
 				fmt.Fprint(cmd.OutOrStdout(), report)
 			}
 
+			// --- Project-rename warning: custom files with a stale root namespace ---
+			if report := migrationDiff.NamespaceRenameReport(); report != "" {
+				log.Warn("ACTION REQUIRED — project was renamed; custom files reference the old namespace")
+				fmt.Fprint(cmd.OutOrStdout(), report)
+			}
+
 			// --- Persist the new snapshot ---
 			if !applied {
 				// Cleanup was deferred (non-interactive without --prune). Keep the
