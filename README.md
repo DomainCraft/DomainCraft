@@ -55,18 +55,27 @@ That's it. Run `domaincraft` to get started.
 
 ### Create a new project
 
-```bash
-domaincraft new
+Write a `domain.yaml` by hand or with the visual editor. A minimal starter looks like:
+
+```yaml
+project:
+  name: My App
+  version: 1.0.0
+
+database: postgresql
+auth:
+  type: jwt
+  roles: [Admin, User]
+api_style: rest
+
+entities:
+  User:
+    fields:
+      id: uuid [primary]
+      email: string [required, unique, email]
+      name: string [required]
+      password: string [required, hidden]
 ```
-
-The interactive wizard guides you through:
-- Project name
-- Target bridge (C#, Java, TypeScript, ...)
-- Database engine
-- Authentication method
-- API style
-
-It creates a starter `domain.yaml` that you can edit to define your entities.
 
 ### Visual editing (DomainCraft Studio)
 
@@ -316,10 +325,10 @@ DomainCraft/
 ## CLI Reference
 
 ```
-domaincraft new / init     # Create a new project (interactive wizard)
 domaincraft generate       # Generate code from domain.yaml
 domaincraft validate       # Validate domain.yaml
 domaincraft bridges        # List available bridges
+domaincraft --version      # Print the CLI version
 
 # Flags
 --domain, -d      Path to domain.yaml (default: domain.yaml)
@@ -329,12 +338,7 @@ domaincraft bridges        # List available bridges
 --addons          Infrastructure accelerators (comma-separated, e.g. "dapr")
 --prune           Apply migration cleanup automatically without prompts (CI)
 --migrate         Run the bridge's database-migration commands after generation (generate only)
---non-interactive  Disable interactive prompts (for CI/scripts)
---name            Project name (for 'new' command)
---version         Project version (for 'new' command)
---database        Database type (postgresql, mysql, sqlite, mssql, mongodb)
---auth            Auth type (jwt, none)
---api-style       API style (rest, graphql, grpc)
+--non-interactive  Disable interactive prompts (CI/scripts)
 ```
 
 ## For Developers

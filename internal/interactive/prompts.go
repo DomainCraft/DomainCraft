@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"github.com/DomainCraft/DomainCraft/internal/bridge"
-	"github.com/DomainCraft/DomainCraft/internal/specmeta"
 
 	"github.com/charmbracelet/huh"
 	"golang.org/x/term"
@@ -48,108 +47,6 @@ func SelectBridge(registry *bridge.Registry) (*bridge.RegistryEntry, error) {
 		return nil, err
 	}
 	return selected, nil
-}
-
-// PromptProjectName asks for the project name interactively.
-func PromptProjectName() (string, error) {
-	var name string
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Project name").
-				Description("The name of your project (e.g. My App)").
-				Placeholder("My App").
-				Value(&name).
-				Validate(func(s string) error {
-					if s == "" {
-						return fmt.Errorf("project name is required")
-					}
-					return nil
-				}),
-		),
-	)
-	if err := form.Run(); err != nil {
-		return "", err
-	}
-	return name, nil
-}
-
-// PromptDatabase asks for the database type interactively.
-func PromptDatabase() (string, error) {
-	var db string
-	options := make([]huh.Option[string], len(specmeta.Databases))
-	for i, d := range specmeta.Databases {
-		label := d
-		if i == 0 {
-			label += " (recommended)"
-		}
-		options[i] = huh.NewOption(label, d)
-	}
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Database").
-				Description("Choose the database engine").
-				Options(options...).
-				Value(&db),
-		),
-	)
-	if err := form.Run(); err != nil {
-		return "", err
-	}
-	return db, nil
-}
-
-// PromptAuth asks for the authentication type interactively.
-func PromptAuth() (string, error) {
-	var auth string
-	options := make([]huh.Option[string], len(specmeta.AuthTypes))
-	for i, a := range specmeta.AuthTypes {
-		label := a
-		if i == 0 {
-			label += " (recommended)"
-		}
-		options[i] = huh.NewOption(label, a)
-	}
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Authentication").
-				Description("Choose the authentication method").
-				Options(options...).
-				Value(&auth),
-		),
-	)
-	if err := form.Run(); err != nil {
-		return "", err
-	}
-	return auth, nil
-}
-
-// PromptAPIStyle asks for the API style interactively.
-func PromptAPIStyle() (string, error) {
-	var style string
-	options := make([]huh.Option[string], len(specmeta.APIStyles))
-	for i, s := range specmeta.APIStyles {
-		label := s
-		if i == 0 {
-			label += " (recommended)"
-		}
-		options[i] = huh.NewOption(label, s)
-	}
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("API style").
-				Description("Choose the API paradigm").
-				Options(options...).
-				Value(&style),
-		),
-	)
-	if err := form.Run(); err != nil {
-		return "", err
-	}
-	return style, nil
 }
 
 // PromptGenerateAdmin asks whether to generate an admin panel alongside the backend.

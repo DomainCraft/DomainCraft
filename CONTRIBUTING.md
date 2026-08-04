@@ -50,11 +50,7 @@ The `--bridge` flag accepts:
 
 ### Create a Starter Domain
 
-```bash
-make cli-init
-# or:
-go run ./cmd/domaincraft init
-```
+Write a `domain.yaml` by hand or with the visual editor ([DomainCraft Studio](https://domaincraft.github.io/domaincraft-studio/)). An example lives in `examples/domain.yaml`.
 
 ---
 

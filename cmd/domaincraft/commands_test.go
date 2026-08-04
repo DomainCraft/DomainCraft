@@ -8,49 +8,6 @@ import (
 	"testing"
 )
 
-func TestInitCommandCreatesDomainYAML(t *testing.T) {
-	workDir := t.TempDir()
-	previousDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd() error = %v", err)
-	}
-	defer func() {
-		_ = os.Chdir(previousDir)
-	}()
-	if err := os.Chdir(workDir); err != nil {
-		t.Fatalf("Chdir() error = %v", err)
-	}
-
-	cmd := newRootCommand()
-	output := &bytes.Buffer{}
-	cmd.SetOut(output)
-	cmd.SetErr(output)
-	cmd.SetArgs([]string{"init"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("init command failed: %v\noutput: %s", err, output.String())
-	}
-
-	mustExist(t, filepath.Join(workDir, "domain.yaml"))
-
-	// Check that domain.yaml is a valid YAML file with basic structure
-	content, err := os.ReadFile(filepath.Join(workDir, "domain.yaml"))
-	if err != nil {
-		t.Fatalf("failed to read domain.yaml: %v", err)
-	}
-
-	contentStr := string(content)
-	if !strings.Contains(contentStr, "project:") {
-		t.Fatalf("domain.yaml should contain 'project:' section")
-	}
-	if !strings.Contains(contentStr, "database:") {
-		t.Fatalf("domain.yaml should contain 'database:' section")
-	}
-	if !strings.Contains(contentStr, "entities:") {
-		t.Fatalf("domain.yaml should contain 'entities:' section")
-	}
-}
-
 func TestVersionFlag(t *testing.T) {
 	cmd := newRootCommand()
 	output := &bytes.Buffer{}

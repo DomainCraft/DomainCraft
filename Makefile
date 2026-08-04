@@ -28,7 +28,7 @@ endif
 export GOCACHE := $(GO_CACHE_DIR)
 export GOTMPDIR := $(GO_TMP_DIR)
 
-.PHONY: help build install run test test-verbose test-coverage lint fmt clean install-deps cli-validate cli-generate cli-new cli-bridges regenerate-spec generate-gui-types copy-spec-skills build-wasm build-wasm-gui
+.PHONY: help build install run test test-verbose test-coverage lint fmt clean install-deps cli-validate cli-generate cli-bridges regenerate-spec generate-gui-types copy-spec-skills build-wasm build-wasm-gui
 
 help:
 	@echo "DomainCraft CLI - Available Commands"
@@ -36,7 +36,6 @@ help:
 	@echo "  make build           - Build the binary to bin/domaincraft"
 	@echo "  make install         - Build and install to /usr/local/bin (or ~/.local/bin)"
 	@echo "  make run             - Build and run with example domain.yaml"
-	@echo "  make cli-new         - Run 'new' wizard (uses DOMAIN=$(DOMAIN))"
 	@echo "  make cli-validate    - Run 'validate' command (uses DOMAIN=$(DOMAIN))"
 	@echo "  make cli-generate    - Run 'generate' command (uses DOMAIN=$(DOMAIN) BRIDGE=$(BRIDGE) OUTPUT=$(OUTPUT))"
 	@echo "  make cli-bridges     - List available bridges"
@@ -83,9 +82,6 @@ run: build
 	@./bin/domaincraft
 
 # Convenience targets for development (via go run)
-cli-new:
-	@go run ./cmd/domaincraft new
-
 cli-validate:
 	@go run ./cmd/domaincraft validate --domain $(DOMAIN)
 
