@@ -61,7 +61,7 @@ func buildSchema() map[string]any {
 					"name":        map[string]any{"type": "string"},
 					"description": map[string]any{"type": "string"},
 					"version":     map[string]any{"type": "string"},
-					"platform":    map[string]any{"type": "string", "description": "Target platform version (e.g. net9.0, net8.0)"},
+					"platform":    map[string]any{"type": "string", "description": "Target platform version (e.g. net10.0). Defaults to net10.0 for the csharp bridge."},
 					"multi_tenancy": map[string]any{
 						"$ref": "#/$defs/MultiTenancy",
 					},
