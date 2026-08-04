@@ -20,6 +20,7 @@ type FieldDefinition struct {
 	IsOptional bool
 	IsUnique   bool
 	IsHidden   bool
+	IsReadonly bool
 	IsRequired bool
 
 	// Relations
@@ -179,6 +180,8 @@ func (l *Lexer) parseModifiers(modStr string, fd *FieldDefinition) error {
 			fd.IsUnique = true
 		case "hidden":
 			fd.IsHidden = true
+		case "readonly":
+			fd.IsReadonly = true
 		case "many":
 			fd.IsMany = true
 		case "email":

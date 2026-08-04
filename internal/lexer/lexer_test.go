@@ -70,16 +70,19 @@ func TestParseRelationType(t *testing.T) {
 
 func TestParseModifiers(t *testing.T) {
 	tests := []struct {
-		input        string
-		wantPrimary  bool
-		wantOptional bool
-		wantUnique   bool
-		wantHidden   bool
+		input         string
+		wantPrimary   bool
+		wantOptional  bool
+		wantUnique    bool
+		wantHidden    bool
+		wantReadonly  bool
 	}{
-		{"string [primary]", true, false, false, false},
-		{"string [optional]", false, true, false, false},
-		{"string [required, unique]", false, false, true, false},
-		{"string [hidden, optional]", false, true, false, true},
+		{"string [primary]", true, false, false, false, false},
+		{"string [optional]", false, true, false, false, false},
+		{"string [required, unique]", false, false, true, false, false},
+		{"string [hidden, optional]", false, true, false, true, false},
+		{"decimal [required, readonly]", false, false, false, false, true},
+		{"string [hidden, readonly]", false, false, false, true, true},
 	}
 
 	for _, tt := range tests {
@@ -100,6 +103,9 @@ func TestParseModifiers(t *testing.T) {
 			}
 			if fd.IsHidden != tt.wantHidden {
 				t.Errorf("got IsHidden %v, want %v", fd.IsHidden, tt.wantHidden)
+			}
+			if fd.IsReadonly != tt.wantReadonly {
+				t.Errorf("got IsReadonly %v, want %v", fd.IsReadonly, tt.wantReadonly)
 			}
 		})
 	}

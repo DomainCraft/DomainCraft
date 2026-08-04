@@ -658,6 +658,9 @@ func TestBuildReconcilesOneToManyDeclaredOnBothSides(t *testing.T) {
 	if transactions.PairFieldName != "wallet" {
 		t.Errorf("transactions.PairFieldName = %q, want wallet", transactions.PairFieldName)
 	}
+	if transactions.PairNavigationName != "Wallet" {
+		t.Errorf("transactions.PairNavigationName = %q, want Wallet", transactions.PairNavigationName)
+	}
 	if transactions.OnDeleteBehavior != "cascade" {
 		t.Errorf("transactions.OnDeleteBehavior = %q, want cascade (borrowed from FK)", transactions.OnDeleteBehavior)
 	}
@@ -687,5 +690,68 @@ func TestBuildReconcilesOneToManyDeclaredOnBothSides(t *testing.T) {
 	}
 	if len(wallet.RelationsIn) != 0 {
 		t.Errorf("Wallet.RelationsIn = %d relations, want 0", len(wallet.RelationsIn))
+	}
+}
+
+// TestBuildPairNavigationNameStripsIdSuffix is a regression test for the C# bridge:
+// when the paired FK field carries an "Id" suffix (e.g. OrderItem.orderId), the
+// [many] side's WithOne(...) must reference the NAVIGATION property ("Order"), not
+// the pascalcased field name ("OrderId"). Without PairNavigationName the generated
+// OrderConfiguration.cs failed to compile with
+// "Cannot implicitly convert type 'System.Guid' to 'Order'".
+func TestBuildPairNavigationNameStripsIdSuffix(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		Database:    "postgresql",
+		EntityOrder: []string{"Order", "OrderItem"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Order": {
+				Name:       "Order",
+				NamePlural: "Orders",
+				FieldOrder: []string{"id", "items"},
+				Fields: map[string]*parser.ParsedField{
+					"id":    mustParsedField(t, "id", "uuid [primary]"),
+					"items": mustParsedField(t, "items", "relation(OrderItem) [many]"),
+				},
+			},
+			"OrderItem": {
+				Name:       "OrderItem",
+				NamePlural: "OrderItems",
+				FieldOrder: []string{"id", "orderId"},
+				Fields: map[string]*parser.ParsedField{
+					"id":      mustParsedField(t, "id", "uuid [primary]"),
+					"orderId": mustParsedField(t, "orderId", "relation(Order) [required, on_delete:cascade]"),
+				},
+			},
+		},
+	}
+	schema.Entities["Order"].Fields["id"].IsPrimary = true
+	schema.Entities["OrderItem"].Fields["id"].IsPrimary = true
+
+	projectIR, err := Build(schema)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	order := findEntity(projectIR, "Order")
+	if order == nil {
+		t.Fatal("Order entity not found")
+	}
+
+	var items *IRRelation
+	for i := range order.RelationsOut {
+		if order.RelationsOut[i].FieldName == "items" {
+			items = &order.RelationsOut[i]
+		}
+	}
+	if items == nil {
+		t.Fatal("Order.items relation not found")
+	}
+	if items.PairFieldName != "orderId" {
+		t.Errorf("items.PairFieldName = %q, want orderId", items.PairFieldName)
+	}
+	// The WithOne navigation must be the stripped navigation name, not "OrderId".
+	if items.PairNavigationName != "Order" {
+		t.Errorf("items.PairNavigationName = %q, want Order", items.PairNavigationName)
 	}
 }

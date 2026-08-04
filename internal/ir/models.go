@@ -159,6 +159,7 @@ type IRField struct {
 	IsNullable         bool
 	IsUnique           bool
 	IsHidden           bool
+	IsReadonly         bool
 	IsRelation         bool
 	IsMany             bool
 	RelationTarget     string
@@ -252,6 +253,12 @@ type IRRelation struct {
 	// (e.g. "wallet" for Wallet.Transactions <-> WalletTransaction.Wallet), so
 	// bridges can render WithOne(...).HasForeignKey(...) instead of a join table.
 	PairFieldName string
+
+	// PairNavigationName is the resolved navigation property name for the paired
+	// FK relation on the target entity. For Order.Items <-> OrderItem.OrderId the
+	// target's field is "orderId" so the navigation is "Order" (not "OrderId").
+	// Bridges use this to render WithOne(e => e.Order) correctly.
+	PairNavigationName string
 }
 
 // IRIndex represents an index.

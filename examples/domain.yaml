@@ -36,7 +36,8 @@ enums:
     - Admin
     - Editor
     - Customer
-    - Guest
+    - Vendor
+    - User
 
   DocStatus:
     - Draft

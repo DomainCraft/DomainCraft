@@ -117,6 +117,7 @@ func Build(schema *parser.ParsedSchema) (*IRProject, error) {
 				IsNullable:         field.IsOptional,
 				IsUnique:           field.IsUnique,
 				IsHidden:           field.IsHidden,
+				IsReadonly:         field.IsReadonly,
 				IsRelation:         field.IsRelation(),
 				IsMany:             field.IsMany,
 				RelationTarget:     field.TargetEntity,
@@ -196,6 +197,7 @@ func Build(schema *parser.ParsedSchema) (*IRProject, error) {
 			// render WithOne(...).HasForeignKey(...) consistently.
 			rel.RelationType = "one-to-many"
 			rel.PairFieldName = pair.FieldName
+			rel.PairNavigationName = pair.NavigationName
 			rel.OnDeleteBehavior = pair.OnDeleteBehavior
 			rel.IsNullable = pair.IsNullable
 		}
