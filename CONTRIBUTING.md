@@ -283,7 +283,16 @@ For `for: project` templates:
 .IsNullable       - Is the FK nullable
 .IsMany           - Is this a collection side
 .RelationType     - "many-to-one", "one-to-many", "many-to-many", "one-to-one"
+.PairFieldName    - For a `[many]` reconciled with a single FK on the target: the FK field name (one-to-many, not a join)
 ```
+
+Inverse navigation names are disambiguated when two relations from the same
+source entity point to the same target: the second becomes
+`<FieldName><EntityPlural>` (e.g. `EscrowContract.Buyer` → `EscrowContracts`,
+`EscrowContract.Seller` → `SellerEscrowContracts`). A `[many]` relation whose
+target declares a single FK back is reclassified as `one-to-many` with
+`PairFieldName` set, so bridges render `HasMany(...).WithOne(...)` instead of a
+many-to-many join table.
 
 ### Step 5: Test the Bridge
 

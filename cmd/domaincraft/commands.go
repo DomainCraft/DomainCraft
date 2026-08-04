@@ -32,6 +32,9 @@ var (
 	prune          bool   // --prune: apply migration cleanup without prompting
 	addonsFlag     string // --addons "dapr,pulsar": comma-separated infrastructure accelerators
 	migrateFlag    bool   // --migrate: run the bridge's database-migration commands after generation
+
+	// version is stamped at build time via -ldflags "-X main.version=vX.Y.Z".
+	version = "dev"
 )
 
 func Execute() {
@@ -42,9 +45,15 @@ func Execute() {
 
 func newRootCommand() *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "domaincraft",
-		Short: "DomainCraft CLI",
-		Long:  "DomainCraft CLI — domain-driven code generator.\nParse domain.yaml, validate it, and generate production-ready code via pluggable bridges.",
+		Use:     "domaincraft",
+		Short:   "DomainCraft CLI",
+		Long:    "DomainCraft CLI — domain-driven code generator.\nParse domain.yaml, validate it, and generate production-ready code via pluggable bridges.",
+		Version: version,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Make the root runnable so Cobra exposes its --version flag, while
+			// still showing the help text when invoked without a subcommand.
+			return cmd.Help()
+		},
 	}
 
 	rootCmd.PersistentFlags().StringVarP(&domainFile, "domain", "d", "domain.yaml", "path to domain.yaml")

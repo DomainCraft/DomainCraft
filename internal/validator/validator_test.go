@@ -1279,6 +1279,77 @@ func TestValidateOnDeleteOnManyToManyNoWarningWithoutOnDelete(t *testing.T) {
 	}
 }
 
+func TestValidateReconciledOneToManyWarning(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		EntityOrder: []string{"Article", "Tag"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Article": {
+				Name:       "Article",
+				FieldOrder: []string{"id", "tags"},
+				Fields: map[string]*parser.ParsedField{
+					"id":   mustParsedField(t, "id", "uuid [primary]"),
+					"tags": mustParsedField(t, "tags", "relation(Tag) [many]"),
+				},
+			},
+			"Tag": {
+				Name:       "Tag",
+				FieldOrder: []string{"id", "article"},
+				Fields: map[string]*parser.ParsedField{
+					"id":      mustParsedField(t, "id", "uuid [primary]"),
+					"article": mustParsedField(t, "article", "relation(Article)"),
+				},
+			},
+		},
+	}
+	schema.Entities["Article"].Fields["id"].IsPrimary = true
+	schema.Entities["Tag"].Fields["id"].IsPrimary = true
+
+	errs := New(schema).Validate()
+	found := false
+	for _, e := range errs {
+		if e.Warning && strings.Contains(e.Message, "reconciled with FK") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected warning about [many] reconciled into a one-to-many, got %v", errs)
+	}
+}
+
+// TestValidateGenuineManyToManyHasNoReconciliationWarning ensures that a real
+// many-to-many (target has no FK back) does NOT trigger the reconciliation hint.
+func TestValidateGenuineManyToManyHasNoReconciliationWarning(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		EntityOrder: []string{"Product", "Tag"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Product": {
+				Name:       "Product",
+				FieldOrder: []string{"id", "tags"},
+				Fields: map[string]*parser.ParsedField{
+					"id":   mustParsedField(t, "id", "uuid [primary]"),
+					"tags": mustParsedField(t, "tags", "relation(Tag) [many]"),
+				},
+			},
+			"Tag": {
+				Name:       "Tag",
+				FieldOrder: []string{"id"},
+				Fields: map[string]*parser.ParsedField{
+					"id": mustParsedField(t, "id", "uuid [primary]"),
+				},
+			},
+		},
+	}
+	schema.Entities["Product"].Fields["id"].IsPrimary = true
+
+	for _, e := range New(schema).Validate() {
+		if strings.Contains(e.Message, "reconciled with FK") {
+			t.Fatalf("unexpected reconciliation warning for genuine many-to-many: %v", e.Message)
+		}
+	}
+}
+
 func TestValidateSeedUniqueConstraintViolation(t *testing.T) {
 	schema := &parser.ParsedSchema{
 		Project:     parser.ProjectConfig{Name: "Test"},

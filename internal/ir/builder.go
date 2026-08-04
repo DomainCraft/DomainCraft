@@ -140,6 +140,9 @@ func Build(schema *parser.ParsedSchema) (*IRProject, error) {
 		entityIndex[irEntity.Name] = &irProject.Entities[len(irProject.Entities)-1]
 	}
 
+	// Pass 2a: build forward (outgoing) relations for every entity. This is a
+	// separate pass from the inverse pass below so the inverse logic always sees
+	// the complete set of RelationsOut regardless of entity declaration order.
 	for i := range irProject.Entities {
 		irEntity := &irProject.Entities[i]
 		sourceEntity := schema.Entities[irEntity.Name]
@@ -158,7 +161,7 @@ func Build(schema *parser.ParsedSchema) (*IRProject, error) {
 				return nil, fmt.Errorf("relation target '%s' referenced by '%s.%s' does not exist", field.TargetEntity, irEntity.Name, field.Name)
 			}
 
-			relation := IRRelation{
+			irEntity.RelationsOut = append(irEntity.RelationsOut, IRRelation{
 				FieldName:        field.Name,
 				TargetEntity:     targetEntity,
 				NavigationName:   field.NavigationName(),
@@ -167,35 +170,40 @@ func Build(schema *parser.ParsedSchema) (*IRProject, error) {
 				IsNullable:       field.IsOptional,
 				IsMany:           field.IsMany,
 				RelationType:     field.RelationType,
-			}
-
-			irEntity.RelationsOut = append(irEntity.RelationsOut, relation)
-
-			// Skip adding inverse RelationsIn if the target already has a forward IsMany
-			// relation to this entity (avoids duplicate inverse collection navigations)
-			hasForwardMany := false
-			for _, out := range targetEntity.RelationsOut {
-				if out.IsMany && out.TargetEntity != nil && out.TargetEntity.Name == irEntity.Name {
-					hasForwardMany = true
-					break
-				}
-			}
-			if !hasForwardMany {
-				targetEntity.RelationsIn = append(targetEntity.RelationsIn, IRRelation{
-					FieldName:        relation.FieldName,
-					TargetEntity:     irEntity,
-					InverseNavName:   relation.InverseNavName,
-					OnDeleteBehavior: relation.OnDeleteBehavior,
-					IsMany:           !relation.IsMany,
-					RelationType:     relation.RelationType,
-				})
-			}
+			})
 		}
 	}
 
-	// Resolve InverseNavName to actual forward navigation name on target entity.
-	// For OrderItem -> Order: InverseNavName should be "Items" (Order's forward nav),
-	// not the computed "OrderItems".
+	// Pass 2b: reconcile one-to-many relations that are declared on BOTH sides.
+	// When entity A has a `[many]` relation to B AND B declares a single (non-many)
+	// FK relation back to A, the two declarations describe the SAME one-to-many
+	// relationship, not a many-to-many. Without this reconciliation the C# bridge
+	// would generate a spurious EF Core join table in addition to the FK.
+	for i := range irProject.Entities {
+		entity := &irProject.Entities[i]
+		for j := range entity.RelationsOut {
+			rel := &entity.RelationsOut[j]
+			if !rel.IsMany || rel.TargetEntity == nil {
+				continue
+			}
+			pair := findSingleBack(rel.TargetEntity, entity.Name)
+			if pair == nil {
+				continue
+			}
+			// This [many] field is really the collection side of a one-to-many;
+			// the FK lives on the target (`pair`). Remember which field that is,
+			// and borrow the FK's required/delete-behavior so the owning side can
+			// render WithOne(...).HasForeignKey(...) consistently.
+			rel.RelationType = "one-to-many"
+			rel.PairFieldName = pair.FieldName
+			rel.OnDeleteBehavior = pair.OnDeleteBehavior
+			rel.IsNullable = pair.IsNullable
+		}
+	}
+
+	// Pass 2c: resolve each forward relation's inverse-navigation name to the
+	// actual collection on the target entity. For OrderItem -> Order the inverse
+	// should be "Items" (Order's forward nav), not the computed "OrderItems".
 	for i := range irProject.Entities {
 		entity := &irProject.Entities[i]
 		for j := range entity.RelationsOut {
@@ -203,14 +211,63 @@ func Build(schema *parser.ParsedSchema) (*IRProject, error) {
 			if rel.TargetEntity == nil || rel.IsMany {
 				continue
 			}
-			// Find matching forward IsMany relation on target entity
 			for _, targetRel := range rel.TargetEntity.RelationsOut {
 				if targetRel.IsMany && targetRel.TargetEntity != nil && targetRel.TargetEntity.Name == entity.Name {
-					// Use the field name (already plural in YAML) for collection navigations
 					rel.InverseNavName = textutil.PascalCase(targetRel.FieldName)
 					break
 				}
 			}
+		}
+	}
+
+	// Pass 3d: build inverse (incoming) relations. Each incoming relation is a
+	// collection navigation on the target that points back to the owning entity.
+	usedInverse := make(map[string]map[string]bool) // target entity -> defined inverse nav names
+	for i := range irProject.Entities {
+		entity := &irProject.Entities[i]
+		for j := range entity.RelationsOut {
+			rel := &entity.RelationsOut[j]
+			target := rel.TargetEntity
+			if target == nil {
+				continue
+			}
+			// Reconcile a double-declared one-to-many: the collection already
+			// exists as the forward `[many]` field on this entity, driven by the
+			// FK declared on the target — no separate inverse collection on target.
+			if rel.IsMany && rel.RelationType == "one-to-many" {
+				continue
+			}
+			// If the target already declares its own forward IsMany relation back
+			// to this entity, the inverse collection lives there instead.
+			if hasForwardManyTo(target, entity.Name) {
+				continue
+			}
+			invName := rel.InverseNavName
+			if usedInverse[target.Name] != nil && usedInverse[target.Name][invName] {
+				// Two relations from the same source to the same target (e.g.
+				// EscrowContract.Buyer / EscrowContract.Seller) would collide on
+				// the pluralized inverse name. Disambiguate with the field name.
+				invName = textutil.PascalCase(rel.FieldName) + textutil.Pluralize(entity.Name)
+				for usedInverse[target.Name] != nil && usedInverse[target.Name][invName] {
+					invName += "Side"
+				}
+			}
+			if usedInverse[target.Name] == nil {
+				usedInverse[target.Name] = make(map[string]bool)
+			}
+			usedInverse[target.Name][invName] = true
+			// Keep the owning relation in sync so EF mapping (.WithMany) and the
+			// inverse collection property use the same name.
+			rel.InverseNavName = invName
+			target.RelationsIn = append(target.RelationsIn, IRRelation{
+				FieldName:        rel.FieldName,
+				TargetEntity:     entity,
+				InverseNavName:   invName,
+				OnDeleteBehavior: rel.OnDeleteBehavior,
+				IsNullable:       rel.IsNullable,
+				IsMany:           !rel.IsMany,
+				RelationType:     rel.RelationType,
+			})
 		}
 	}
 
@@ -219,6 +276,37 @@ func Build(schema *parser.ParsedSchema) (*IRProject, error) {
 	irProject.Entities = sortEntities(irProject.Entities)
 
 	return irProject, nil
+}
+
+// findSingleBack returns the target entity's forward single (non-many) FK
+// relation that points back to sourceName, or nil if none exists.
+func findSingleBack(target *IREntity, sourceName string) *IRRelation {
+	if target == nil {
+		return nil
+	}
+	for i := range target.RelationsOut {
+		r := &target.RelationsOut[i]
+		if !r.IsMany && r.TargetEntity != nil && r.TargetEntity.Name == sourceName {
+			return r
+		}
+	}
+	return nil
+}
+
+// hasForwardManyTo reports whether target declares a forward IsMany relation
+// that points back to entityName. When true, the inverse collection for that
+// relationship already lives on target as its own field.
+func hasForwardManyTo(target *IREntity, entityName string) bool {
+	if target == nil {
+		return false
+	}
+	for i := range target.RelationsOut {
+		r := &target.RelationsOut[i]
+		if r.IsMany && r.TargetEntity != nil && r.TargetEntity.Name == entityName {
+			return true
+		}
+	}
+	return false
 }
 
 // sortEntities reorders the slice by FK dependencies using Kahn's algorithm.

@@ -51,6 +51,22 @@ func TestInitCommandCreatesDomainYAML(t *testing.T) {
 	}
 }
 
+func TestVersionFlag(t *testing.T) {
+	cmd := newRootCommand()
+	output := &bytes.Buffer{}
+	cmd.SetOut(output)
+	cmd.SetErr(output)
+	cmd.SetArgs([]string{"--version"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--version failed: %v", err)
+	}
+
+	if !strings.Contains(output.String(), "version") {
+		t.Fatalf("expected version in output, got %q", output.String())
+	}
+}
+
 func TestValidateCommandSucceeds(t *testing.T) {
 	workDir := t.TempDir()
 	domainPath := filepath.Join(workDir, "domain.yaml")

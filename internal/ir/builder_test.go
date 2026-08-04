@@ -505,3 +505,187 @@ func targetName(e *IREntity) string {
 	}
 	return e.Name
 }
+
+func findEntity(project *IRProject, name string) *IREntity {
+	if project == nil {
+		return nil
+	}
+	for i := range project.Entities {
+		if project.Entities[i].Name == name {
+			return &project.Entities[i]
+		}
+	}
+	return nil
+}
+
+// TestBuildDisambiguatesInverseNavigationNames is a regression test: when two
+// relations from the SAME entity point to the SAME target (e.g. EscrowContract
+// has both a Buyer and a Seller referencing User), the pluralized inverse name
+// "EscrowContracts" would collide and produce duplicate C# navigation properties.
+func TestBuildDisambiguatesInverseNavigationNames(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		Database:    "postgresql",
+		EntityOrder: []string{"User", "EscrowContract"},
+		Entities: map[string]*parser.ParsedEntity{
+			"User": {
+				Name:       "User",
+				NamePlural: "Users",
+				FieldOrder: []string{"id"},
+				Fields:     map[string]*parser.ParsedField{"id": mustParsedField(t, "id", "uuid [primary]")},
+			},
+			"EscrowContract": {
+				Name:       "EscrowContract",
+				NamePlural: "EscrowContracts",
+				FieldOrder: []string{"id", "buyer", "seller"},
+				Fields: map[string]*parser.ParsedField{
+					"id":     mustParsedField(t, "id", "uuid [primary]"),
+					"buyer":  mustParsedField(t, "buyer", "relation(User) [required, on_delete:restrict]"),
+					"seller": mustParsedField(t, "seller", "relation(User) [required, on_delete:restrict]"),
+				},
+			},
+		},
+	}
+	schema.Entities["User"].Fields["id"].IsPrimary = true
+	schema.Entities["EscrowContract"].Fields["id"].IsPrimary = true
+
+	projectIR, err := Build(schema)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	user := findEntity(projectIR, "User")
+	if user == nil {
+		t.Fatal("User entity not found")
+	}
+	if len(user.RelationsIn) != 2 {
+		t.Fatalf("User.RelationsIn = %d relations, want 2", len(user.RelationsIn))
+	}
+	seen := make(map[string]bool)
+	names := make([]string, 0, len(user.RelationsIn))
+	for _, in := range user.RelationsIn {
+		if seen[in.InverseNavName] {
+			t.Errorf("duplicate inverse navigation name %q on User", in.InverseNavName)
+		}
+		seen[in.InverseNavName] = true
+		names = append(names, in.InverseNavName)
+	}
+	// The first relation keeps the plural name; the colliding one is prefixed
+	// with its field name so both collections exist with unique names.
+	want := []string{"EscrowContracts", "SellerEscrowContracts"}
+	for i, w := range want {
+		if i >= len(names) || names[i] != w {
+			t.Errorf("User.RelationsIn[%d].InverseNavName = %v, want %v", i, names, want)
+			break
+		}
+	}
+
+	// The owning relations must reference the SAME disambiguated names so the
+	// EF mapping (.WithMany) matches the generated collection properties.
+	ec := findEntity(projectIR, "EscrowContract")
+	if ec == nil {
+		t.Fatal("EscrowContract entity not found")
+	}
+	invByField := make(map[string]string)
+	for _, out := range ec.RelationsOut {
+		invByField[out.FieldName] = out.InverseNavName
+	}
+	if invByField["buyer"] != "EscrowContracts" {
+		t.Errorf("buyer inverse = %q, want EscrowContracts", invByField["buyer"])
+	}
+	if invByField["seller"] != "SellerEscrowContracts" {
+		t.Errorf("seller inverse = %q, want SellerEscrowContracts", invByField["seller"])
+	}
+}
+
+// TestBuildReconcilesOneToManyDeclaredOnBothSides is a regression test: a
+// `[many]` relation whose target declares a single FK back describes the SAME
+// one-to-many relationship, not a many-to-many. Without reconciliation the C#
+// bridge would emit a spurious EF join table AND a bogus inverse collection.
+func TestBuildReconcilesOneToManyDeclaredOnBothSides(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		Database:    "postgresql",
+		EntityOrder: []string{"Wallet", "WalletTransaction"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Wallet": {
+				Name:       "Wallet",
+				NamePlural: "Wallets",
+				FieldOrder: []string{"id", "transactions"},
+				Fields: map[string]*parser.ParsedField{
+					"id":           mustParsedField(t, "id", "uuid [primary]"),
+					"transactions": mustParsedField(t, "transactions", "relation(WalletTransaction) [many]"),
+				},
+			},
+			"WalletTransaction": {
+				Name:       "WalletTransaction",
+				NamePlural: "WalletTransactions",
+				FieldOrder: []string{"id", "wallet"},
+				Fields: map[string]*parser.ParsedField{
+					"id":     mustParsedField(t, "id", "uuid [primary]"),
+					"wallet": mustParsedField(t, "wallet", "relation(Wallet) [required, on_delete:cascade]"),
+				},
+			},
+		},
+	}
+	schema.Entities["Wallet"].Fields["id"].IsPrimary = true
+	schema.Entities["WalletTransaction"].Fields["id"].IsPrimary = true
+
+	projectIR, err := Build(schema)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	wallet := findEntity(projectIR, "Wallet")
+	if wallet == nil {
+		t.Fatal("Wallet entity not found")
+	}
+
+	// The [many] relation must be classified as the collection side of a
+	// one-to-many (paired with the FK declared on WalletTransaction).
+	var transactions *IRRelation
+	for i := range wallet.RelationsOut {
+		if wallet.RelationsOut[i].FieldName == "transactions" {
+			transactions = &wallet.RelationsOut[i]
+		}
+	}
+	if transactions == nil {
+		t.Fatal("Wallet.transactions relation not found")
+	}
+	if transactions.RelationType != "one-to-many" {
+		t.Errorf("transactions.RelationType = %q, want one-to-many", transactions.RelationType)
+	}
+	if transactions.PairFieldName != "wallet" {
+		t.Errorf("transactions.PairFieldName = %q, want wallet", transactions.PairFieldName)
+	}
+	if transactions.OnDeleteBehavior != "cascade" {
+		t.Errorf("transactions.OnDeleteBehavior = %q, want cascade (borrowed from FK)", transactions.OnDeleteBehavior)
+	}
+
+	// The FK side's inverse collection resolves to the [many] field's name.
+	wt := findEntity(projectIR, "WalletTransaction")
+	if wt == nil {
+		t.Fatal("WalletTransaction entity not found")
+	}
+	var walletRel *IRRelation
+	for i := range wt.RelationsOut {
+		if wt.RelationsOut[i].FieldName == "wallet" {
+			walletRel = &wt.RelationsOut[i]
+		}
+	}
+	if walletRel == nil {
+		t.Fatal("WalletTransaction.wallet relation not found")
+	}
+	if walletRel.InverseNavName != "Transactions" {
+		t.Errorf("wallet.InverseNavName = %q, want Transactions", walletRel.InverseNavName)
+	}
+
+	// No spurious inverse collection on WalletTransaction (would become the
+	// many-to-many join collection) and no duplicate collection on Wallet.
+	if len(wt.RelationsIn) != 0 {
+		t.Errorf("WalletTransaction.RelationsIn = %d relations, want 0 (no join collection)", len(wt.RelationsIn))
+	}
+	if len(wallet.RelationsIn) != 0 {
+		t.Errorf("Wallet.RelationsIn = %d relations, want 0", len(wallet.RelationsIn))
+	}
+}

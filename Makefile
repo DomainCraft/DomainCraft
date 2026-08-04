@@ -8,6 +8,13 @@ SKILLS_DIR ?= ../DomainCraft-skills/domaincraft-core
 GO_CACHE_DIR ?= $(CURDIR)/.gocache
 GO_TMP_DIR ?= $(CURDIR)/bin
 
+# Release version stamped into the CLI (and WASM validator) binary.
+ifeq ($(OS),Windows_NT)
+VERSION ?= $(shell git describe --tags --abbrev=0 2>nul || echo dev)
+else
+VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
+endif
+
 # Cross-platform file copy used by the spec-distribution targets.
 # Cross-platform copy used by the spec-distribution targets.
 ifeq ($(OS),Windows_NT)
@@ -52,8 +59,8 @@ install-deps:
 	@go mod tidy
 
 build: install-deps
-	@echo "Building domaincraft..."
-	@go build -o bin/domaincraft ./cmd/domaincraft
+	@echo "Building domaincraft ($(VERSION))..."
+	@go build -ldflags "-X main.version=$(VERSION)" -o bin/domaincraft ./cmd/domaincraft
 
 install: build
 	@echo "Installing domaincraft..."
@@ -151,11 +158,6 @@ dev-test-watch:
 # WASM targets
 WASM_OUTPUT ?= bin/validate.wasm
 WASM_GUI_DIR ?= ../DomainCraftGui/public/wasm
-ifeq ($(OS),Windows_NT)
-VERSION ?= $(shell git describe --tags --abbrev=0 2>nul || echo dev)
-else
-VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
-endif
 WASM_LDFLAGS := -X main.version=$(VERSION)
 
 ifeq ($(OS),Windows_NT)

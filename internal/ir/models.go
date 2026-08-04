@@ -245,6 +245,13 @@ type IRRelation struct {
 	IsNullable       bool
 	IsMany           bool
 	RelationType     string
+
+	// PairFieldName is set when a `[many]` relation is reconciled with a single
+	// (FK) relation declared on the target entity: the two declarations describe
+	// one one-to-many relationship. It holds the FK field name on the target
+	// (e.g. "wallet" for Wallet.Transactions <-> WalletTransaction.Wallet), so
+	// bridges can render WithOne(...).HasForeignKey(...) instead of a join table.
+	PairFieldName string
 }
 
 // IRIndex represents an index.

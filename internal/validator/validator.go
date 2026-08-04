@@ -376,6 +376,23 @@ func (v *Validator) buildEntityFields() map[string][]string {
 	})
 }
 
+// singleFKBack returns the first single (non-many) relation field declared on
+// target that points back to sourceName, or nil when there is none. It mirrors
+// the IR builder's one-to-many reconciliation: a `[many]` relation whose target
+// declares such a FK describes the same relationship twice.
+func (v *Validator) singleFKBack(target *parser.ParsedEntity, sourceName string) *parser.ParsedField {
+	if target == nil {
+		return nil
+	}
+	for _, fieldName := range target.FieldOrder {
+		field := target.Fields[fieldName]
+		if field != nil && field.IsRelation() && !field.IsMany && field.TargetEntity == sourceName {
+			return field
+		}
+	}
+	return nil
+}
+
 func (v *Validator) validateEnums() []ValidationError {
 	var errs []ValidationError
 	for name, values := range v.schema.Enums {
@@ -593,6 +610,21 @@ func (v *Validator) validateField(entityName string, fieldName string, field *pa
 		// on_delete is meaningless on many-to-many relations (join table has no FK to delete).
 		if field.IsMany && field.OnDelete != "" {
 			errs = append(errs, ValidationError{Entity: entityName, Field: fieldName, Message: "on_delete is meaningless on a many-to-many relation; remove it or use a many-to-one relation instead", Warning: true})
+		}
+		// A [many] relation whose target also declares a single FK back to this
+		// entity is reconciled into ONE one-to-many (the FK lives on the target,
+		// the collection on this entity) — not a many-to-many join.
+		if field.IsMany {
+			if target, ok := v.schema.Entities[field.TargetEntity]; ok {
+				if back := v.singleFKBack(target, entityName); back != nil {
+					errs = append(errs, ValidationError{
+						Entity:  entityName,
+						Field:   fieldName,
+						Message: fmt.Sprintf("[many] relation is reconciled with FK '%s' on %s into a one-to-many relationship (collection on %s, FK %sId on %s); remove one side if you meant a many-to-many join", back.Name, field.TargetEntity, entityName, back.Name, field.TargetEntity),
+						Warning: true,
+					})
+				}
+			}
 		}
 		// Self-referential required cascade is dangerous.
 		if field.TargetEntity == entityName && !field.IsOptional && field.OnDelete == "cascade" {
