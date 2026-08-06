@@ -349,6 +349,8 @@ DomainCraft/
 domaincraft generate       # Generate code from domain.yaml
 domaincraft validate       # Validate domain.yaml
 domaincraft bridges        # List available bridges
+domaincraft update         # Update the domaincraft core to the latest release
+domaincraft update --check # Report whether a newer core version exists (no download)
 domaincraft --version      # Print the CLI version
 
 # Flags
