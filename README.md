@@ -283,7 +283,28 @@ domaincraft generate --bridge ./my-bridge
 domaincraft generate --bridge DomainCraft/domaincraft-bridge-csharp
 ```
 
-Bridges from the registry are cached in `~/.domaincraft/bridges/`.
+Bridges from the registry are downloaded once and cached in `~/.domaincraft/bridges/`; later runs use the cache instead of re-downloading.
+
+### Bridge Caching & Updates
+
+Downloaded bridges are cached locally, so generating again never re-clones the repository. DomainCraft also keeps them **fresh**: it periodically checks each cached bridge against its GitHub repo and tells you when a newer version is available.
+
+- **How it works:** every cached bridge carries a small metadata file (`.domaincraft-meta.json`) recording its source, `bridge.yaml` version, git commit, and the last time the remote was checked. Updates are detected through the GitHub REST API — no re-clone or re-download just to check. Detection is GitHub-only, since a bridge specified as a local path is always used fresh.
+- **Automatic:** in interactive mode you'll be prompted to update when a newer version exists; non-interactive runs keep the cached copy and print a warning.
+- **Force an update (CI-safe, no prompts):**
+
+  ```bash
+  domaincraft generate --update-bridges
+  ```
+
+- **Inspect update availability without generating:**
+
+  ```bash
+  domaincraft bridges --check-updates
+  ```
+
+- **Offline-safe:** if the remote is unreachable or `git` is missing, generation simply uses the cached copy — a failed update check never blocks you.
+- **Package versions too:** resolved NuGet package versions are cached per bridge in `~/.domaincraft/cache/<bridge>/packages.json` (TTL 24h), so regenerating doesn't hit the package registry every time — and each bridge keeps its own cache as more bridges ship.
 
 ### Create Your Own Bridge
 
@@ -304,8 +325,8 @@ DomainCraft/
 │   ├── ir/                  # Intermediate Representation builder
 │   ├── renderer/            # Template rendering engine + file manifest
 │   ├── snapshot/            # Schema snapshot / migration engine
-│   ├── bridge/              # Bridge registry and resolver
-│   ├── packages/            # Package version registry resolution
+│   ├── bridge/              # Bridge registry, resolver, cache & update checks
+│   ├── packages/            # Package version registry resolution (TTL-cached)
 │   ├── specmeta/            # Single source of truth for allowed types/features/databases
 │   ├── interactive/         # Interactive CLI prompts (huh)
 │   └── testutil/            # Shared test helpers
@@ -338,6 +359,8 @@ domaincraft --version      # Print the CLI version
 --addons          Infrastructure accelerators (comma-separated, e.g. "dapr")
 --prune           Apply migration cleanup automatically without prompts (CI)
 --migrate         Run the bridge's database-migration commands after generation (generate only)
+--update-bridges  Download newer versions of cached bridges before generating (no prompts, CI)
+--check-updates   Report outdated cached bridges (bridges only)
 --non-interactive  Disable interactive prompts (CI/scripts)
 ```
 

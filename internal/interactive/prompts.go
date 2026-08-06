@@ -66,6 +66,32 @@ func PromptGenerateAdmin() (bool, error) {
 	return generate, nil
 }
 
+// PromptBridgeUpdate asks whether to update a cached bridge to the newer
+// upstream version. Returns true to download the update, false to keep the
+// cached copy.
+func PromptBridgeUpdate(entry bridge.RegistryEntry, update *bridge.Update) (bool, error) {
+	title := fmt.Sprintf("Update bridge %q?", entry.ID)
+
+	description := "A newer version is available for the cached bridge."
+	if update.LocalVersion != "" {
+		description = fmt.Sprintf("A newer version is available for the cached bridge (v%s). Update the cached copy?", update.LocalVersion)
+	}
+
+	var apply bool
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title(title).
+				Description(description).
+				Value(&apply),
+		),
+	)
+	if err := form.Run(); err != nil {
+		return false, err
+	}
+	return apply, nil
+}
+
 // FileChoice is a selectable file with a display label.
 type FileChoice struct {
 	Path  string // value returned when selected

@@ -14,11 +14,20 @@ import (
 //   - empty — caller should prompt the user
 type Resolver struct {
 	registry *Registry
+	ensure   *EnsureOptions // update/caching policy; nil = no update checks
 }
 
 // NewResolver creates a resolver backed by the given registry.
 func NewResolver(registry *Registry) *Resolver {
 	return &Resolver{registry: registry}
+}
+
+// WithEnsureOptions returns a resolver that applies the given caching/update
+// policy whenever it clones or refreshes a bridge from a registry ID.
+func (r *Resolver) WithEnsureOptions(opts *EnsureOptions) *Resolver {
+	r2 := *r
+	r2.ensure = opts
+	return &r2
 }
 
 // Resolve maps a bridge identifier to a local path containing bridge.yaml.
@@ -42,7 +51,7 @@ func (r *Resolver) Resolve(input string) (string, error) {
 
 	// 2. Registry ID — check cache, clone if needed.
 	if entry := r.registry.ByID(input); entry != nil {
-		return EnsureBridge(*entry)
+		return EnsureBridge(*entry, r.ensure)
 	}
 
 	// 3. GitHub shorthand "owner/repo" — clone directly.
@@ -51,7 +60,7 @@ func (r *Resolver) Resolve(input string) (string, error) {
 			ID:     parts[1],
 			GitHub: input,
 		}
-		return EnsureBridge(entry)
+		return EnsureBridge(entry, r.ensure)
 	}
 
 	return "", fmt.Errorf("bridge %q not found: not a local path, registry ID, or owner/repo", input)

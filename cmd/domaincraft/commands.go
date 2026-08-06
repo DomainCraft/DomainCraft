@@ -31,6 +31,8 @@ var (
 	prune          bool   // --prune: apply migration cleanup without prompting
 	addonsFlag     string // --addons "dapr,pulsar": comma-separated infrastructure accelerators
 	migrateFlag    bool   // --migrate: run the bridge's database-migration commands after generation
+	updateBridges  bool   // --update-bridges: download newer bridge versions before generating
+	checkUpdates   bool   // bridges --check-updates: contact remotes and report outdated cached bridges
 
 	// version is stamped at build time via -ldflags "-X main.version=vX.Y.Z".
 	version = "dev"
@@ -60,6 +62,7 @@ func newRootCommand() *cobra.Command {
 	rootCmd.PersistentFlags().StringVarP(&outputDir, "output", "o", "generated", "output directory")
 	rootCmd.PersistentFlags().BoolVar(&nonInteractive, "non-interactive", false, "disable interactive prompts (requires all flags)")
 	rootCmd.PersistentFlags().StringVar(&addonsFlag, "addons", "", "comma-separated infrastructure addons to enable (e.g. dapr)")
+	rootCmd.PersistentFlags().BoolVar(&updateBridges, "update-bridges", false, "check cached bridges for newer versions and download them before generating (no prompts)")
 
 	rootCmd.AddCommand(newValidateCmd())
 	rootCmd.AddCommand(newGenerateCmd())
@@ -105,7 +108,7 @@ func newGenerateCmd() *cobra.Command {
 			}
 			log.Success("Schema valid (%d entities)", len(schema.Entities))
 
-			resolvedPath, bridgeName, err := resolveBridgeInteractive()
+			resolvedPath, bridgeName, err := resolveBridgeInteractive(log)
 			if err != nil {
 				return err
 			}
@@ -229,7 +232,7 @@ func newGenerateCmd() *cobra.Command {
 // --- bridges ---
 
 func newBridgesCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "bridges",
 		Short: "List available bridges",
 		Long:  "Show all known bridges with their cache status.",
@@ -243,11 +246,11 @@ func newBridgesCmd() *cobra.Command {
 				return nil
 			}
 
-			fmt.Fprintf(out, "%-20s %-10s %-10s %s\n", "ID", "Language", "Status", "Description")
-			fmt.Fprintf(out, "%-20s %-10s %-10s %s\n",
+			fmt.Fprintf(out, "%-20s %-10s %-26s %s\n", "ID", "Language", "Status", "Description")
+			fmt.Fprintf(out, "%-20s %-10s %-26s %s\n",
 				strings.Repeat("-", 20),
 				strings.Repeat("-", 10),
-				strings.Repeat("-", 10),
+				strings.Repeat("-", 26),
 				strings.Repeat("-", 40),
 			)
 
@@ -255,21 +258,35 @@ func newBridgesCmd() *cobra.Command {
 				status := "remote"
 				if bridge.IsCached(e) {
 					status = "cached"
+					if checkUpdates {
+						if u, err := bridge.CheckForUpdate(e, 0); err == nil && u != nil {
+							status = "update available " + versionDelta(u)
+						}
+					}
 				}
-				fmt.Fprintf(out, "%-20s %-10s %-10s %s\n", e.ID, e.Language, status, e.Description)
+				fmt.Fprintf(out, "%-20s %-10s %-26s %s\n", e.ID, e.Language, status, e.Description)
 			}
 
+			if checkUpdates {
+				fmt.Fprintln(out, "\nHint: run `domaincraft generate --update-bridges` to download available updates.")
+			}
 			return nil
 		},
 	}
+
+	// --check-updates — contact each cached bridge's remote and report whether a
+	// newer version is available (no modification, just status).
+	cmd.Flags().BoolVar(&checkUpdates, "check-updates", false, "contact remotes and report whether cached bridges are outdated")
+
+	return cmd
 }
 
 // --- helpers ---
 
 // resolveBridgeInteractive resolves the bridge from the --bridge flag, or
 // prompts the user interactively. Returns (path, displayName, error).
-func resolveBridgeInteractive() (string, string, error) {
-	resolver := bridge.NewResolver(bridge.Default())
+func resolveBridgeInteractive(log *logger.Logger) (string, string, error) {
+	resolver := bridge.NewResolver(bridge.Default()).WithEnsureOptions(bridgeEnsureOptions(log))
 
 	if bridgePath != "" {
 		resolved, err := resolver.Resolve(bridgePath)
@@ -293,10 +310,49 @@ func resolveBridgeInteractive() (string, string, error) {
 	return resolved, entry.Name, nil
 }
 
+// bridgeEnsureOptions builds the bridge caching/update policy from the CLI
+// flags and terminal state:
+//   - --update-bridges consents to downloading newer versions (CI-safe);
+//   - otherwise, an interactive terminal is prompted when an update is found;
+//   - in non-interactive mode the cached copy is kept and a warning is logged.
+func bridgeEnsureOptions(log *logger.Logger) *bridge.EnsureOptions {
+	opts := &bridge.EnsureOptions{
+		Force: updateBridges,
+		Warn:  log.Warn,
+	}
+
+	switch {
+	case updateBridges:
+		// The flag itself is the consent — update without prompting.
+		opts.ConfirmUpdate = func(entry bridge.RegistryEntry, u *bridge.Update) (bool, error) {
+			log.Info("Updating bridge %s %s", entry.ID, versionDelta(u))
+			return true, nil
+		}
+	case interactive.IsTerminal():
+		opts.ConfirmUpdate = func(entry bridge.RegistryEntry, u *bridge.Update) (bool, error) {
+			return interactive.PromptBridgeUpdate(entry, u)
+		}
+	default:
+		// Non-interactive without the flag: keep the cached copy; the bridge
+		// package logs a warning pointing at --update-bridges.
+		opts.ConfirmUpdate = nil
+	}
+	return opts
+}
+
+// versionDelta renders a "vX" hint for a detected update, or "" when the local
+// version is unknown.
+func versionDelta(u *bridge.Update) string {
+	if u == nil || u.LocalVersion == "" {
+		return ""
+	}
+	return fmt.Sprintf("(v%s available)", u.LocalVersion)
+}
+
 // generateAdminPanel renders the optional admin panel bridge into the output
 // directory and returns the extra file manifest entries.
 func generateAdminPanel(irProject *ir.IRProject, log *logger.Logger) ([]renderer.RenderedFile, error) {
-	resolver := bridge.NewResolver(bridge.Default())
+	resolver := bridge.NewResolver(bridge.Default()).WithEnsureOptions(bridgeEnsureOptions(log))
 
 	adminID := adminBridge
 	if adminID == "" {

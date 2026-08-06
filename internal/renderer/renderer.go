@@ -521,7 +521,8 @@ func containsOwnerToken(roles []string) bool {
 	return false
 }
 
-// resolvePackages resolves all package versions from the package registry.
+// resolvePackages resolves all package versions from the package registry,
+// cached per bridge so repeated runs don't hit the registry every time.
 func (r *Renderer) resolvePackages() map[string]string {
 	if len(r.config.RegistryPackages) == 0 {
 		return nil
@@ -529,7 +530,7 @@ func (r *Renderer) resolvePackages() map[string]string {
 
 	result := make(map[string]string, len(r.config.RegistryPackages))
 	for key, packageID := range r.config.RegistryPackages {
-		version, err := packages.ResolveVersion(r.config.RegistryURL, packageID)
+		version, err := packages.ResolveVersionCached(r.cacheNamespace(), r.config.RegistryURL, packageID)
 		if err != nil {
 			r.log.Warn("failed to resolve package %s: %v", packageID, err)
 			continue
@@ -539,6 +540,27 @@ func (r *Renderer) resolvePackages() map[string]string {
 		}
 	}
 	return result
+}
+
+// cacheNamespace returns a stable, filesystem-safe identifier for this bridge,
+// used to keep its package-version cache separate from other bridges'. The
+// bridge.yaml name is preferred; a path-based fallback covers nameless bridges.
+func (r *Renderer) cacheNamespace() string {
+	name := strings.ToLower(strings.TrimSpace(r.config.Name))
+	if name == "" {
+		name = filepath.Base(r.bridgeDir)
+	}
+
+	var b strings.Builder
+	for _, ch := range name {
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' {
+			b.WriteRune(ch)
+		}
+	}
+	if b.Len() == 0 {
+		return "default"
+	}
+	return b.String()
 }
 
 func (r *Renderer) renderContexts(scope string, project *ir.IRProject, pkgs map[string]string) ([]RenderContext, error) {
