@@ -184,6 +184,12 @@ func newGenerateCmd() *cobra.Command {
 				fmt.Fprint(cmd.OutOrStdout(), report)
 			}
 
+			// --- Smart warning for field renames (data-preserving column rename) ---
+			if report := migrationDiff.FieldRenameReport(); report != "" {
+				log.Warn("ACTION REQUIRED — fields were renamed; apply a safe column rename to avoid data loss")
+				fmt.Fprint(cmd.OutOrStdout(), report)
+			}
+
 			// --- Project-rename warning: custom files with a stale root namespace ---
 			if report := migrationDiff.NamespaceRenameReport(); report != "" {
 				log.Warn("ACTION REQUIRED — project was renamed; custom files reference the old namespace")

@@ -218,6 +218,84 @@ func TestComputeDiffNamespaceRename(t *testing.T) {
 	}
 }
 
+func TestComputeDiffFieldRename(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "src/Application/Services/ProductService.cs")
+
+	old := &Snapshot{
+		Entities: map[string]EntityState{
+			"Product": {
+				Fields:      map[string]string{"id": "uuid", "title": "string"},
+				FieldOldNames: map[string]string{},
+			},
+		},
+		Files: []renderer.RenderedFile{
+			{Path: "src/Application/Services/ProductService.cs", Entity: "Product", Custom: true},
+		},
+	}
+
+	// name: string [required, old_name: title] — title -> name, same string type.
+	project := &ir.IRProject{
+		Entities: []ir.IREntity{
+			{
+				Name:       "Product",
+				NamePlural: "Products",
+				Fields: []ir.IRField{
+					{Name: "id", DatabaseType: "uuid", IsPrimary: true},
+					{
+						Name:                  "name",
+						OldName:               "title",
+						DatabaseType:          "string",
+						DatabaseColumnName:    "name",
+						OldDatabaseColumnName: "title",
+					},
+				},
+			},
+		},
+	}
+
+	diff := ComputeDiff(old, project, dir)
+	if len(diff.FieldRenames) != 1 {
+		t.Fatalf("got %d field renames, want 1", len(diff.FieldRenames))
+	}
+	fr := diff.FieldRenames[0]
+	if fr.Entity != "Product" || fr.OldField != "title" || fr.NewField != "name" {
+		t.Errorf("field rename = %+v, want Product title->name", fr)
+	}
+	if fr.OldColumn != "title" || fr.NewColumn != "name" {
+		t.Errorf("columns = %s -> %s, want title -> name", fr.OldColumn, fr.NewColumn)
+	}
+	if len(fr.CustomFiles) != 1 || fr.CustomFiles[0] != "src/Application/Services/ProductService.cs" {
+		t.Errorf("custom files = %v, want [src/Application/Services/ProductService.cs]", fr.CustomFiles)
+	}
+	report := diff.FieldRenameReport()
+	if report == "" {
+		t.Error("FieldRenameReport() should be non-empty")
+	}
+	if diff.IsEmpty() {
+		t.Error("diff with a field rename must not be empty")
+	}
+}
+
+func TestComputeDiffFieldRenameSkipsTypeChangeOnly(t *testing.T) {
+	dir := t.TempDir()
+
+	// Field keeps its name but the type changes — that is a type change, not a rename.
+	old := &Snapshot{
+		Entities: map[string]EntityState{"Product": {Fields: map[string]string{"price": "int"}}},
+	}
+	project := testProject("Product")
+	project.Entities[0].Fields = []ir.IRField{{Name: "id", DatabaseType: "uuid", IsPrimary: true}, {Name: "price", DatabaseType: "decimal", DatabaseColumnName: "price"}}
+
+	diff := ComputeDiff(old, project, dir)
+	if len(diff.FieldRenames) != 0 {
+		t.Fatalf("got %d field renames, want 0", len(diff.FieldRenames))
+	}
+	if len(diff.TypeChanges) != 1 {
+		t.Fatalf("got %d type changes, want 1", len(diff.TypeChanges))
+	}
+}
+
 func testProject(entityName string) *ir.IRProject {
 	return &ir.IRProject{
 		Entities: []ir.IREntity{

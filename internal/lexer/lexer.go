@@ -27,6 +27,12 @@ type FieldDefinition struct {
 	OnDelete string // cascade, set_null, restrict, no_action
 	IsMany   bool   // for many-to-many (parser infers RelationType from this)
 
+	// OldName is a rename hint for the migration engine: the field was previously
+	// named OldName (e.g. `name: string [required, old_name: title]`). Bridges use
+	// it to generate a safe RenameColumn instead of DropColumn + AddColumn, which
+	// would destroy the column's data on a real database.
+	OldName string
+
 	// Validation
 	Validations   map[string]string // min, max, email, url, regex, gte, lt, lte, gt
 	DefaultValue  string
@@ -162,6 +168,14 @@ func (l *Lexer) parseModifiers(modStr string, fd *FieldDefinition) error {
 				return fmt.Errorf("unknown on_delete value: %s. valid: cascade, set_null, restrict, no_action", value)
 			}
 			fd.OnDelete = value
+		case "old_name":
+			// Rename hint: `name: string [required, old_name: title]`. The value is
+			// the field's previous name; the migration engine + bridges turn it into
+			// a safe column rename instead of a destructive drop + add.
+			if value == "" {
+				return fmt.Errorf("old_name requires a previous field name")
+			}
+			fd.OldName = value
 		default:
 			return fmt.Errorf("unknown modifier: %s", key)
 		}
@@ -232,7 +246,31 @@ func (fd *FieldDefinition) Validate() error {
 		}
 	}
 
+	// old_name must be a valid identifier (like the field name itself).
+	if fd.OldName != "" && !isValidIdentifier(fd.OldName) {
+		return fmt.Errorf("old_name %q is not a valid field name", fd.OldName)
+	}
+
 	return nil
+}
+
+// isValidIdentifier reports whether s is a valid domain.yaml field name.
+func isValidIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		if i == 0 {
+			if r != '_' && !(r >= 'a' && r <= 'z') && !(r >= 'A' && r <= 'Z') {
+				return false
+			}
+			continue
+		}
+		if r != '_' && !(r >= 'a' && r <= 'z') && !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
 }
 
 // ParseFieldString is a convenience function for parsing a field string

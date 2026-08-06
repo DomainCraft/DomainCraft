@@ -152,8 +152,12 @@ type IREntity struct {
 // IRField represents a field in IR.
 type IRField struct {
 	Name               string
+	OldName            string // previous field name (rename hint from `old_name:` modifier)
 	DatabaseType       string
 	DatabaseColumnName string // snake_case column name (computed once, used by templates)
+	// OldDatabaseColumnName is the snake_case column name of OldName. Bridges use
+	// it to emit a safe RenameColumn instead of DropColumn + AddColumn.
+	OldDatabaseColumnName string
 	NavigationName     string // resolved navigation property name (for relation fields)
 	IsPrimary          bool
 	IsNullable         bool

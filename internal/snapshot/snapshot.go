@@ -39,6 +39,10 @@ const (
 type EntityState struct {
 	OldName string            `json:"old_name,omitempty"`
 	Fields  map[string]string `json:"fields"` // field name -> IR database type
+	// FieldOldNames records the field-level `old_name` rename hints (previous
+	// field name) declared in the CURRENT model, so the next diff can recognize
+	// a safe column rename instead of a destructive drop + add.
+	FieldOldNames map[string]string `json:"field_old_names,omitempty"` // field name -> previous field name
 }
 
 // Snapshot is the persisted history of the domain model for one output dir.
@@ -93,10 +97,14 @@ func New(bridge string, project *ir.IRProject, files []renderer.RenderedFile) *S
 	entities := make(map[string]EntityState, len(project.Entities))
 	for _, e := range project.Entities {
 		fields := make(map[string]string, len(e.Fields))
+		fieldOldNames := make(map[string]string)
 		for _, f := range e.Fields {
 			fields[f.Name] = f.DatabaseType
+			if f.OldName != "" {
+				fieldOldNames[f.Name] = f.OldName
+			}
 		}
-		entities[e.Name] = EntityState{OldName: e.OldName, Fields: fields}
+		entities[e.Name] = EntityState{OldName: e.OldName, Fields: fields, FieldOldNames: fieldOldNames}
 	}
 	return &Snapshot{
 		FormatVersion:    FormatVersion,
@@ -137,6 +145,20 @@ type TypeChange struct {
 	CustomFiles []string // custom (overwrite: false) file paths for the entity that still exist
 }
 
+// FieldRename reports a field renamed via the field-level `old_name` modifier.
+// A safe column rename (RenameColumn) preserves the data on a real database,
+// whereas a DropColumn + AddColumn would destroy it.
+type FieldRename struct {
+	Entity   string // current entity name
+	OldField string // previous field name (the old_name hint)
+	NewField string // current field name
+	OldColumn string // previous snake_case DB column
+	NewColumn string // current snake_case DB column
+	OldType  string
+	NewType  string
+	CustomFiles []string // custom (overwrite: false) file paths for the entity that still exist
+}
+
 // NamespaceMismatch reports custom (overwrite: false) files that still reference
 // the previous project's root namespace after the project was renamed. The bridge
 // regenerates only the generated (overwrite: true) files with the new namespace;
@@ -153,12 +175,13 @@ type Diff struct {
 	Deleted       []DeletedEntity
 	Renamed       []Rename
 	TypeChanges   []TypeChange
+	FieldRenames  []FieldRename
 	NamespaceRename *NamespaceMismatch
 }
 
 // IsEmpty reports whether the diff contains nothing actionable.
 func (d *Diff) IsEmpty() bool {
-	return len(d.Deleted) == 0 && len(d.Renamed) == 0 && len(d.TypeChanges) == 0 && d.NamespaceRename == nil
+	return len(d.Deleted) == 0 && len(d.Renamed) == 0 && len(d.TypeChanges) == 0 && len(d.FieldRenames) == 0 && d.NamespaceRename == nil
 }
 
 // ComputeDiff compares an old snapshot against the current IR project.
@@ -243,6 +266,52 @@ func ComputeDiff(old *Snapshot, project *ir.IRProject, outputDir string) *Diff {
 			return diff.TypeChanges[i].Entity < diff.TypeChanges[j].Entity
 		}
 		return diff.TypeChanges[i].Field < diff.TypeChanges[j].Field
+	})
+
+	// Field renames (via the field-level `old_name` modifier). Detected when the
+	// current field declares a previous name that exists in the old snapshot and
+	// the current field name did not exist there (a true rename, not a shadow).
+	// A safe RenameColumn preserves the data — a Drop+Add would destroy it.
+	for oldName, oldState := range old.Entities {
+		newName := oldName
+		if mapped, ok := renamedByOld[oldName]; ok {
+			newName = mapped
+		}
+		newEntity, ok := newEntities[newName]
+		if !ok {
+			continue
+		}
+		customFiles := existingFilePaths(outputDir, customEntityFiles(old.Files, oldName))
+		for _, f := range newEntity.Fields {
+			if f.OldName == "" {
+				continue
+			}
+			oldFieldType, wasPresent := oldState.Fields[f.OldName]
+			if !wasPresent {
+				continue
+			}
+			// Ambiguous: the new field name already existed in the previous model,
+			// so this is not a clean rename (two different columns would be involved).
+			if _, already := oldState.Fields[f.Name]; already {
+				continue
+			}
+			diff.FieldRenames = append(diff.FieldRenames, FieldRename{
+				Entity:      newName,
+				OldField:    f.OldName,
+				NewField:    f.Name,
+				OldColumn:   f.OldDatabaseColumnName,
+				NewColumn:   f.DatabaseColumnName,
+				OldType:     oldFieldType,
+				NewType:     f.DatabaseType,
+				CustomFiles: customFiles,
+			})
+		}
+	}
+	sort.Slice(diff.FieldRenames, func(i, j int) bool {
+		if diff.FieldRenames[i].Entity != diff.FieldRenames[j].Entity {
+			return diff.FieldRenames[i].Entity < diff.FieldRenames[j].Entity
+		}
+		return diff.FieldRenames[i].OldField < diff.FieldRenames[j].OldField
 	})
 
 	// Project rename: custom (overwrite: false) files carry the old root namespace
@@ -393,6 +462,37 @@ func RenameEntityFile(outputDir, relPath, oldName, newName string) (newRel strin
 		return newRel, false, fmt.Errorf("rename %s to %s: %w", relPath, newRel, err)
 	}
 	return newRel, true, nil
+}
+
+// FieldRenameReport returns a human-readable report for the field renames in
+// the diff, or an empty string when there are none. It tells the developer that
+// a safe column rename is required — a DropColumn + AddColumn would destroy the
+// existing data. Column names are bridge-agnostic snake_case; each bridge turns
+// a field's `old_name` into its own rename statement (see the C# bridge, which
+// generates migrationBuilder.RenameColumn guidance).
+func (d *Diff) FieldRenameReport() string {
+	if len(d.FieldRenames) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("You renamed fields in domain.yaml. Keep the existing data by renaming the DB\n")
+	b.WriteString("column instead of dropping it and adding a new one (that would erase the data):\n\n")
+	for i, fr := range d.FieldRenames {
+		fmt.Fprintf(&b, "%d. Entity: %s — field %s renamed to %s\n", i+1, fr.Entity, fr.OldField, fr.NewField)
+		fmt.Fprintf(&b, "   Column:   %s -> %s\n", fr.OldColumn, fr.NewColumn)
+		if fr.OldType != fr.NewType {
+			fmt.Fprintf(&b, "   Types:    %s -> %s (was a rename AND a type change)\n", fr.OldType, fr.NewType)
+		}
+		if len(fr.CustomFiles) > 0 {
+			b.WriteString("   Files that may reference the old name:\n")
+			for _, f := range fr.CustomFiles {
+				fmt.Fprintf(&b, "   - %s\n", f)
+			}
+		}
+	}
+	b.WriteString("\nThe generated bridge code emits the exact rename statement for each renamed column;\n")
+	b.WriteString("apply it as a single migration before regenerating schema-dependent data.\n")
+	return b.String()
 }
 
 // TypeChangeReport returns a human-readable refactoring report for the type

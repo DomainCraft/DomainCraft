@@ -364,6 +364,46 @@ func TestBuildCopiesDatabaseColumnName(t *testing.T) {
 	t.Fatal("firstName field not found in IR")
 }
 
+// TestBuildCopiesFieldOldName verifies the field-level `old_name` rename hint is
+// carried into the IR, including the derived old snake_case DB column name that
+// bridges use to emit a safe RenameColumn.
+func TestBuildCopiesFieldOldName(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		Database:    "postgresql",
+		EntityOrder: []string{"Product"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Product": {
+				Name:       "Product",
+				NamePlural: "Products",
+				FieldOrder: []string{"id", "displayName"},
+				Fields: map[string]*parser.ParsedField{
+					"id":          mustParsedField(t, "id", "uuid [primary]"),
+					"displayName": mustParsedField(t, "displayName", "string [required, old_name:productTitle]"),
+				},
+			},
+		},
+	}
+
+	projectIR, err := Build(schema)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	for _, f := range projectIR.Entities[0].Fields {
+		if f.Name == "displayName" {
+			if f.OldName != "productTitle" {
+				t.Errorf("OldName = %q, want %q", f.OldName, "productTitle")
+			}
+			if f.OldDatabaseColumnName != "product_title" {
+				t.Errorf("OldDatabaseColumnName = %q, want %q", f.OldDatabaseColumnName, "product_title")
+			}
+			return
+		}
+	}
+	t.Fatal("displayName field not found in IR")
+}
+
 // TestBuildResolvesTargetEntityAfterTopoSort is a regression test: after the
 // topological sort reorders the entity slice, every relation's TargetEntity
 // pointer must still point at the correct entity (the in-place reorder used to

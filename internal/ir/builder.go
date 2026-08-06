@@ -10,6 +10,16 @@ import (
 	"github.com/DomainCraft/DomainCraft/pkg/textutil"
 )
 
+// oldDatabaseColumnName returns the snake_case DB column name of a field's
+// old_name hint (previous field name), or "" when the field has no rename hint.
+// Bridges use it to emit a safe RenameColumn(old, new) migration.
+func oldDatabaseColumnName(field *parser.ParsedField) string {
+	if field == nil || field.OldName == "" {
+		return ""
+	}
+	return textutil.ToDatabaseColumnName(field.OldName)
+}
+
 // Build converts ParsedSchema into IRProject.
 func Build(schema *parser.ParsedSchema) (*IRProject, error) {
 	if schema == nil {
@@ -109,10 +119,12 @@ func Build(schema *parser.ParsedSchema) (*IRProject, error) {
 			}
 
 			irEntity.Fields = append(irEntity.Fields, IRField{
-				Name:               field.Name,
-				DatabaseType:       databaseType,
-				DatabaseColumnName: field.DatabaseColumnName,
-				NavigationName:     field.NavigationName(),
+				Name:                  field.Name,
+				OldName:               field.OldName,
+				DatabaseType:          databaseType,
+				DatabaseColumnName:    field.DatabaseColumnName,
+				OldDatabaseColumnName: oldDatabaseColumnName(field),
+				NavigationName:        field.NavigationName(),
 				IsPrimary:          field.IsPrimary,
 				IsNullable:         field.IsOptional,
 				IsUnique:           field.IsUnique,

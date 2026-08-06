@@ -497,6 +497,18 @@ func (v *Validator) validateEntity(entityName string, entity *parser.ParsedEntit
 
 		errs = append(errs, v.validateField(entityName, fieldName, field)...)
 
+		// old_name is a rename hint: the previous name of this field. It must not
+		// equal the current name (that would be a self-rename) nor shadow another
+		// field currently on the entity.
+		if field.OldName != "" {
+			if field.OldName == fieldName {
+				errs = append(errs, ValidationError{Entity: entityName, Field: fieldName, Message: "old_name cannot equal the field name (it is the field's previous name)"})
+			}
+			if prev, exists := entity.Fields[field.OldName]; exists && prev != field {
+				errs = append(errs, ValidationError{Entity: entityName, Field: fieldName, Message: fmt.Sprintf("old_name '%s' collides with an existing field '%s' on the same entity", field.OldName, prev.Name)})
+			}
+		}
+
 		// DB column collision.
 		col := field.DatabaseColumnName
 		if prev, exists := columnNames[col]; exists {

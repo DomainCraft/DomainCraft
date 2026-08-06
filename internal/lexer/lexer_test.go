@@ -183,6 +183,43 @@ func TestParseOnDelete(t *testing.T) {
 	}
 }
 
+func TestParseOldName(t *testing.T) {
+	fd, err := ParseFieldString("string [required, old_name: title]")
+	if err != nil {
+		t.Fatalf("ParseFieldString() error = %v", err)
+	}
+	if fd.OldName != "title" {
+		t.Errorf("got OldName %q, want title", fd.OldName)
+	}
+	if !fd.IsRequired {
+		t.Errorf("got IsRequired %v, want true", fd.IsRequired)
+	}
+
+	// Quoted values are accepted too.
+	fd, err = ParseFieldString("text [optional, old_name: \"summary\"]")
+	if err != nil {
+		t.Fatalf("ParseFieldString() quoted error = %v", err)
+	}
+	if fd.OldName != "summary" {
+		t.Errorf("got OldName %q, want summary", fd.OldName)
+	}
+}
+
+func TestParseOldNameInvalid(t *testing.T) {
+	tests := []string{
+		"string [old_name:]",
+		"string [old_name: not valid name]",
+		"string [old_name: myField-1]",
+	}
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			if _, err := ParseFieldString(input); err == nil {
+				t.Errorf("ParseFieldString(%q) expected an error", input)
+			}
+		})
+	}
+}
+
 func TestParseArrayType(t *testing.T) {
 	fd, err := ParseFieldString("array(int)")
 	if err != nil {

@@ -33,6 +33,89 @@ func TestValidateDetectsMissingPrimaryKey(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsOldNameEqualToFieldName(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		EntityOrder: []string{"Product"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Product": {
+				Name:       "Product",
+				FieldOrder: []string{"id", "name"},
+				Fields: map[string]*parser.ParsedField{
+					"id":   mustParsedField(t, "id", "uuid [primary]"),
+					"name": mustParsedField(t, "name", "string [required, old_name:name]"),
+				},
+			},
+		},
+	}
+
+	errs := New(schema).Validate()
+	errs = nonWarnings(errs)
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e.Message, "old_name cannot equal the field name") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected error about self-referential old_name, got %v", errs)
+	}
+}
+
+func TestValidateRejectsOldNameCollidingWithExistingField(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		EntityOrder: []string{"Product"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Product": {
+				Name:       "Product",
+				FieldOrder: []string{"id", "title", "name"},
+				Fields: map[string]*parser.ParsedField{
+					"id":    mustParsedField(t, "id", "uuid [primary]"),
+					"title": mustParsedField(t, "title", "string"),
+					"name":  mustParsedField(t, "name", "string [required, old_name:title]"),
+				},
+			},
+		},
+	}
+
+	errs := New(schema).Validate()
+	errs = nonWarnings(errs)
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e.Message, "old_name 'title' collides with an existing field") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected error about old_name colliding with an existing field, got %v", errs)
+	}
+}
+
+func TestValidateAcceptsValidOldName(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Test"},
+		EntityOrder: []string{"Product"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Product": {
+				Name:       "Product",
+				FieldOrder: []string{"id", "name"},
+				Fields: map[string]*parser.ParsedField{
+					"id":   mustParsedField(t, "id", "uuid [primary]"),
+					"name": mustParsedField(t, "name", "string [required, old_name:title]"),
+				},
+			},
+		},
+	}
+
+	errs := nonWarnings(New(schema).Validate())
+	for _, e := range errs {
+		if strings.Contains(e.Message, "old_name") {
+			t.Fatalf("unexpected old_name error: %v", e)
+		}
+	}
+}
+
 func TestValidateDetectsDuplicatePrimaryKey(t *testing.T) {
 	schema := &parser.ParsedSchema{
 		Project:     parser.ProjectConfig{Name: "Test"},
