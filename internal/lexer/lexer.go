@@ -55,8 +55,10 @@ func (l *Lexer) Parse() (*FieldDefinition, error) {
 		Validations: make(map[string]string),
 	}
 
-	// Split into type and modifiers: "string [required, max:255]"
-	parts := strings.Split(l.input, "[")
+	// Split into type and modifiers: "string [required, max:255]". Split at the
+	// first "[" only; the rest (modifiers, which may themselves contain brackets,
+	// e.g. default values like "[a, b, c]") is handled by parseModifiers.
+	parts := strings.SplitN(l.input, "[", 2)
 
 	typePart := strings.TrimSpace(parts[0])
 	if typePart == "" {
@@ -70,7 +72,7 @@ func (l *Lexer) Parse() (*FieldDefinition, error) {
 
 	// Parse modifiers if present
 	if len(parts) > 1 {
-		modifierStr := strings.TrimRight(parts[1], "]")
+		modifierStr := strings.TrimSuffix(strings.TrimSpace(parts[1]), "]")
 		if err := l.parseModifiers(modifierStr, fd); err != nil {
 			return nil, err
 		}
@@ -135,7 +137,7 @@ func (l *Lexer) parseType(typeStr string, fd *FieldDefinition) error {
 
 // parseModifiers parses modifiers inside square brackets
 func (l *Lexer) parseModifiers(modStr string, fd *FieldDefinition) error {
-	modifiers := strings.Split(modStr, ",")
+	modifiers := splitModifiers(modStr)
 
 	for _, mod := range modifiers {
 		mod = strings.TrimSpace(mod)
@@ -210,6 +212,51 @@ func (l *Lexer) parseModifiers(modStr string, fd *FieldDefinition) error {
 	}
 
 	return nil
+}
+
+// splitModifiers splits a modifier clause on commas while respecting square
+// brackets (array default values like "[a, b, c]") and single/double quotes.
+// Without this, "default:[a, b, c]" would be chopped at every comma and the
+// default value would never round-trip through parse → serialize → parse.
+func splitModifiers(s string) []string {
+	var out []string
+	var cur strings.Builder
+	depth := 0
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if quote != 0 {
+			cur.WriteByte(c)
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"':
+			quote = c
+			cur.WriteByte(c)
+		case '[':
+			depth++
+			cur.WriteByte(c)
+		case ']':
+			if depth > 0 {
+				depth--
+			}
+			cur.WriteByte(c)
+		case ',':
+			if depth == 0 {
+				out = append(out, cur.String())
+				cur.Reset()
+				continue
+			}
+			cur.WriteByte(c)
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	out = append(out, cur.String())
+	return out
 }
 
 // Validate checks the logical consistency of a FieldDefinition

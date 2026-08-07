@@ -156,6 +156,44 @@ func TestParseDefaults(t *testing.T) {
 	}
 }
 
+func TestParseArrayDefault(t *testing.T) {
+	tests := []struct {
+		input          string
+		wantDefault    string
+		wantArray      bool
+		wantElementType string
+	}{
+		{"array(string) [optional, default:[a, b, c]]", "[a, b, c]", true, "string"},
+		{"array(int) [default:[1, 2, 3]]", "[1, 2, 3]", true, "int"},
+		{"string [default:\"a,b\"]", "a,b", false, ""},
+		{"array(string) [default:[single]]", "[single]", true, "string"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			fd, err := ParseFieldString(tt.input)
+			if err != nil {
+				t.Errorf("ParseFieldString() error = %v", err)
+				return
+			}
+			if fd.Type == "array" && !tt.wantArray {
+				t.Errorf("got type array, want plain type")
+			}
+			if tt.wantArray {
+				if fd.Type != "array" {
+					t.Errorf("got type %v, want array", fd.Type)
+				}
+				if fd.TargetType != tt.wantElementType {
+					t.Errorf("got array element type %v, want %v", fd.TargetType, tt.wantElementType)
+				}
+			}
+			if fd.DefaultValue != tt.wantDefault {
+				t.Errorf("got default %v, want %v", fd.DefaultValue, tt.wantDefault)
+			}
+		})
+	}
+}
+
 func TestParseOnDelete(t *testing.T) {
 	tests := []struct {
 		input        string
