@@ -3,8 +3,8 @@ BRIDGE ?= bridges/csharp
 OUTPUT ?= generated
 BRIDGE_NAME ?= csharp
 SPEC_OUTPUT ?= spec/domain.schema.json
-GUI_DIR ?= ../DomainCraftGui
-SKILLS_DIR ?= ../DomainCraft-skills/domaincraft-core
+GUI_DIR ?= ../domaincraft-studio
+SKILLS_DIR ?= ../domaincraft-skills/domaincraft-core
 GO_CACHE_DIR ?= $(CURDIR)/.gocache
 GO_TMP_DIR ?= $(CURDIR)/bin
 
@@ -41,9 +41,9 @@ help:
 	@echo "  make cli-bridges     - List available bridges"
 	@echo "  make regenerate-spec - Regenerate spec/domain.schema.json, copy to skills, and regenerate GUI types"
 	@echo "  make generate-gui-types - Regenerate only GUI TypeScript types from schema"
-	@echo "  make copy-spec-skills - Copy regenerated schema to DomainCraft-skills/domaincraft-core"
+	@echo "  make copy-spec-skills - Copy regenerated schema to domaincraft-skills/domaincraft-core"
 	@echo "  make build-wasm      - Build WASM validator binary (GOOS=js GOARCH=wasm)"
-	@echo "  make build-wasm-gui  - Build WASM and copy to DomainCraftGui/public/wasm/"
+	@echo "  make build-wasm-gui  - Build WASM and copy to domaincraft-studio/public/wasm/"
 	@echo "  make test            - Run all tests"
 	@echo "  make test-verbose    - Run tests with verbose output"
 	@echo "  make test-coverage   - Run tests and generate coverage report"
@@ -153,7 +153,7 @@ dev-test-watch:
 
 # WASM targets
 WASM_OUTPUT ?= bin/validate.wasm
-WASM_GUI_DIR ?= ../DomainCraftGui/public/wasm
+WASM_GUI_DIR ?= ../domaincraft-studio/public/wasm
 WASM_LDFLAGS := -X main.version=$(VERSION)
 
 ifeq ($(OS),Windows_NT)

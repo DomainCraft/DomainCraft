@@ -47,12 +47,12 @@ type EntityState struct {
 
 // Snapshot is the persisted history of the domain model for one output dir.
 type Snapshot struct {
-	FormatVersion int                     `json:"format_version"`
-	Bridge        string                  `json:"bridge"`
-	CreatedAt     string                  `json:"created_at"`
-	ProjectNamespace string               `json:"project_namespace,omitempty"` // pascal-cased project name used as the C#/other root namespace
-	Files         []renderer.RenderedFile `json:"files"`
-	Entities      map[string]EntityState  `json:"entities"`
+	FormatVersion    int                     `json:"format_version"`
+	Bridge           string                  `json:"bridge"`
+	CreatedAt        string                  `json:"created_at"`
+	ProjectNamespace string                  `json:"project_namespace,omitempty"` // pascal-cased project name used as the C#/other root namespace
+	Files            []renderer.RenderedFile `json:"files"`
+	Entities         map[string]EntityState  `json:"entities"`
 }
 
 // SnapshotPath returns the absolute path of the snapshot for an output dir.
@@ -149,13 +149,13 @@ type TypeChange struct {
 // A safe column rename (RenameColumn) preserves the data on a real database,
 // whereas a DropColumn + AddColumn would destroy it.
 type FieldRename struct {
-	Entity   string // current entity name
-	OldField string // previous field name (the old_name hint)
-	NewField string // current field name
-	OldColumn string // previous snake_case DB column
-	NewColumn string // current snake_case DB column
-	OldType  string
-	NewType  string
+	Entity      string // current entity name
+	OldField    string // previous field name (the old_name hint)
+	NewField    string // current field name
+	OldColumn   string // previous snake_case DB column
+	NewColumn   string // current snake_case DB column
+	OldType     string
+	NewType     string
 	CustomFiles []string // custom (overwrite: false) file paths for the entity that still exist
 }
 
@@ -172,16 +172,24 @@ type NamespaceMismatch struct {
 
 // Diff is the computed difference between the old snapshot and the current IR.
 type Diff struct {
-	Deleted       []DeletedEntity
-	Renamed       []Rename
-	TypeChanges   []TypeChange
-	FieldRenames  []FieldRename
+	Deleted         []DeletedEntity
+	Renamed         []Rename
+	TypeChanges     []TypeChange
+	FieldRenames    []FieldRename
 	NamespaceRename *NamespaceMismatch
 }
 
 // IsEmpty reports whether the diff contains nothing actionable.
 func (d *Diff) IsEmpty() bool {
 	return len(d.Deleted) == 0 && len(d.Renamed) == 0 && len(d.TypeChanges) == 0 && len(d.FieldRenames) == 0 && d.NamespaceRename == nil
+}
+
+// HasSchemaChanges reports whether the diff contains changes that must reach the
+// database (deleted/renamed entities, field renames or type changes). Used to
+// decide whether `domaincraft generate --prune` should run the bridge's migration
+// commands automatically.
+func (d *Diff) HasSchemaChanges() bool {
+	return len(d.Deleted) > 0 || len(d.Renamed) > 0 || len(d.FieldRenames) > 0 || len(d.TypeChanges) > 0
 }
 
 // ComputeDiff compares an old snapshot against the current IR project.
@@ -380,7 +388,7 @@ func (d *Diff) NamespaceRenameReport() string {
 	for i, f := range n.Files {
 		fmt.Fprintf(&b, "%d. %s\n", i+1, f)
 	}
-	b.WriteString("\nReplace `namespace "+n.OldNamespace+".` with `namespace "+n.NewNamespace+".` in each file ")
+	b.WriteString("\nReplace `namespace " + n.OldNamespace + ".` with `namespace " + n.NewNamespace + ".` in each file ")
 	b.WriteString("(or run a find-and-replace across your project).\n")
 	return b.String()
 }
@@ -490,8 +498,10 @@ func (d *Diff) FieldRenameReport() string {
 			}
 		}
 	}
-	b.WriteString("\nThe generated bridge code emits the exact rename statement for each renamed column;\n")
-	b.WriteString("apply it as a single migration before regenerating schema-dependent data.\n")
+	b.WriteString("\nIn a single migration, rename each column (RenameColumn) instead of letting EF\n")
+	b.WriteString("drop and re-add it — the generated code already writes the new column name, so a\n")
+	b.WriteString("RenameColumn is the only data-preserving step. `domaincraft generate --prune`\n")
+	b.WriteString("re-runs the bridge's migration commands automatically after a rename.\n")
 	return b.String()
 }
 

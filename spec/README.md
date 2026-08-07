@@ -8,7 +8,7 @@ This folder contains the generated JSON Schema for `domain.yaml`.
 make regenerate-spec
 ```
 
-This runs `cmd/schema-gen` to produce `spec/domain.schema.json`, then regenerates `DomainCraftGui/src/types/domain.generated.ts`.
+This runs `cmd/schema-gen` to produce `spec/domain.schema.json`, then regenerates `domaincraft-studio/src/types/domain.generated.ts`.
 
 ## Entity `old_name` (migration hint)
 
@@ -53,7 +53,7 @@ make build-wasm
 make build-wasm-gui
 ```
 
-The WASM binary is served from `DomainCraftGui/public/wasm/validate.wasm`.
+The WASM binary is served from `domaincraft-studio/public/wasm/validate.wasm`.
 `wasm_exec.js` (Go's WASM runtime) is already in `public/wasm/`.
 
 ### When to rebuild

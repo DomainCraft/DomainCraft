@@ -39,13 +39,13 @@ go run ./cmd/domaincraft validate --domain domain.yaml
 ### Generate Code
 
 ```bash
-make cli-generate DOMAIN=domain.yaml BRIDGE=../DomainCraftCsharp OUTPUT=generated
+make cli-generate DOMAIN=domain.yaml BRIDGE=../domaincraft-bridge-csharp OUTPUT=generated
 # or directly:
 go run ./cmd/domaincraft generate --domain domain.yaml --bridge /path/to/bridge --output generated
 ```
 
 The `--bridge` flag accepts:
-- A directory containing `bridge.yaml` (e.g. `../DomainCraftCsharp`)
+- A directory containing `bridge.yaml` (e.g. `../domaincraft-bridge-csharp`)
 - A direct path to a `bridge.yaml` file
 
 ### Create a Starter Domain
@@ -135,7 +135,7 @@ templates:
 - Use `{{-` and `-}}` whitespace trimming so output is clean.
 - Feature fields (`createdAt`, `updatedAt`, `createdBy`, `updatedBy`, `deletedAt`, `version`) are auto-injected by features — skip them in field loops with `isFeatureField`.
 - Iterate `range .Entity.Fields` with `if` filters instead of pre-computing slices; prefer clear names over clever control flow.
-- **Split Core (always regenerated) and Custom (`overwrite: false`) code.** Generated logic belongs behind interfaces/base classes; the developer-owned implementation is scaffolded only once. The migration engine protects custom files when entities are deleted, renamed, or change types. The C# bridge (`DomainCraftCsharp`) is the reference implementation: it ships the full **Generation Gap** pattern (`partial class` services split into an always-overwritten generated part with `partial void` hooks and a scaffold-once developer part).
+- **Split Core (always regenerated) and Custom (`overwrite: false`) code.** Generated logic belongs behind interfaces/base classes; the developer-owned implementation is scaffolded only once. The migration engine protects custom files when entities are deleted, renamed, or change types. The C# bridge (`domaincraft-bridge-csharp`) is the reference implementation: it ships the full **Generation Gap** pattern (`partial class` services split into an always-overwritten generated part with `partial void` hooks and a scaffold-once developer part).
 
 ### Schema migration (snapshots)
 

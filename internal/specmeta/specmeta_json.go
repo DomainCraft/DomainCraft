@@ -6,7 +6,7 @@ package specmeta
 // live SPECMETA object — no other copy is shipped.
 //
 // Keep the keys in sync with the Specmeta type in
-// DomainCraftGui/src/lib/specmeta.ts.
+// domaincraft-studio/src/lib/specmeta.ts.
 func SpecmetaJSON() map[string]any {
 	return map[string]any{
 		"primitiveFieldTypes":        PrimitiveFieldTypes,

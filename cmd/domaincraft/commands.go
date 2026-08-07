@@ -160,17 +160,8 @@ func newGenerateCmd() *cobra.Command {
 				manifest = append(manifest, adminManifest...)
 			}
 
-			// --- Database migrations ---
-			// Optionally run the bridge's declared migration commands so the
-			// developer never has to think about SQL schemas. Gated on --migrate.
-			if migrateFlag && rendererInstance.MigrationConfig() != nil && rendererInstance.MigrationConfig().Enabled {
-				if err := runDatabaseMigrations(rendererInstance.MigrationConfig(), outputDir, cmd, log); err != nil {
-					return err
-				}
-			}
-
 			// --- Migration actions: clean up orphaned / renamed files ---
-			// Files written this run must never be touched by cleanup.
+			// Files written from this run must never be touched by cleanup.
 			fresh := make(map[string]bool)
 			for _, f := range manifest {
 				if f.Written {
@@ -180,6 +171,18 @@ func newGenerateCmd() *cobra.Command {
 			applied, err := applyMigrationActions(migrationDiff, fresh, log, cmd)
 			if err != nil {
 				return err
+			}
+
+			// --- Database migrations ---
+			// Run the bridge's declared migration commands so the developer never
+			// has to think about SQL schemas. Triggered explicitly via --migrate, or
+			// automatically in --prune mode when the diff detected renames/deletions
+			// that must reach the database (skipped when cleanup was deferred).
+			shouldMigrate := migrateFlag || (prune && migrationDiff.HasSchemaChanges())
+			if applied && shouldMigrate && rendererInstance.MigrationConfig() != nil && rendererInstance.MigrationConfig().Enabled {
+				if err := runDatabaseMigrations(rendererInstance.MigrationConfig(), outputDir, cmd, log); err != nil {
+					return err
+				}
 			}
 
 			// --- Smart warning for type changes (manual refactoring report) ---
@@ -223,7 +226,7 @@ func newGenerateCmd() *cobra.Command {
 	// --admin [bridge-id] — optional value, defaults to "admin-alpine" when flag is present without value.
 	cmd.Flags().StringVar(&adminBridge, "admin", "", "generate admin panel (optionally specify bridge ID, default: admin-alpine)")
 	// --prune — automatically delete/rename orphaned files without prompting (CI).
-	cmd.Flags().BoolVar(&prune, "prune", false, "automatically remove/rename orphaned files detected by the migration engine (no prompts)")
+	cmd.Flags().BoolVar(&prune, "prune", false, "automatically remove/rename orphaned files and rewrite renamed identifiers in custom files, then run the bridge's database migrations when the schema changed (no prompts; CI-safe)")
 	// --migrate — after generation, run the bridge's declared database-migration commands.
 	cmd.Flags().BoolVar(&migrateFlag, "migrate", false, "run the bridge's database-migration commands after generation (e.g. dotnet ef database update)")
 
@@ -430,6 +433,44 @@ func applyMigrationActions(diff *snapshot.Diff, fresh map[string]bool, log *logg
 	}
 	out := cmd.OutOrStdout()
 
+	// In --prune mode the tool owns the whole cleanup, so it also rewrites
+	// identifier references in developer-owned files: the project's root
+	// namespace after a project rename, and renamed entity fields. Generated
+	// files are already regenerated with the new names; custom files are not,
+	// so this is what keeps them compiling.
+	if prune {
+		if diff.NamespaceRename != nil {
+			for _, rel := range diff.NamespaceRename.Files {
+				if fresh[rel] {
+					continue
+				}
+				rewrote, err := snapshot.RewriteFile(outputDir, rel, snapshot.NamespaceTransform(diff.NamespaceRename))
+				if err != nil {
+					log.Warn("could not rewrite namespace in %s: %v", rel, err)
+					continue
+				}
+				if rewrote {
+					fmt.Fprintf(out, "  ▸ updated namespace %s -> %s in %s\n", diff.NamespaceRename.OldNamespace, diff.NamespaceRename.NewNamespace, rel)
+				}
+			}
+		}
+		for _, fr := range diff.FieldRenames {
+			for _, rel := range fr.CustomFiles {
+				if fresh[rel] {
+					continue
+				}
+				rewrote, err := snapshot.RewriteFile(outputDir, rel, snapshot.FieldTransform(fr))
+				if err != nil {
+					log.Warn("could not rewrite field references in %s: %v", rel, err)
+					continue
+				}
+				if rewrote {
+					fmt.Fprintf(out, "  ▸ updated field %s -> %s in %s\n", fr.OldField, fr.NewField, rel)
+				}
+			}
+		}
+	}
+
 	applied := true
 	for _, del := range diff.Deleted {
 		if len(del.Files) == 0 {
@@ -446,7 +487,7 @@ func applyMigrationActions(diff *snapshot.Diff, fresh map[string]bool, log *logg
 		if len(ren.Files) == 0 {
 			continue
 		}
-		done, err := handleRename(ren, fresh, log, out)
+		done, err := handleRename(ren, diff, fresh, log, out)
 		if err != nil {
 			return false, err
 		}
@@ -499,9 +540,11 @@ func handleDeletedEntity(del snapshot.DeletedEntity, fresh map[string]bool, log 
 }
 
 // handleRename renames custom files after a prompt and removes stale generated
-// files (they have been regenerated under the new entity name). Returns false
-// when cleanup was deferred (non-interactive without --prune).
-func handleRename(ren snapshot.Rename, fresh map[string]bool, log *logger.Logger, out io.Writer) (bool, error) {
+// files (they have been regenerated under the new entity name). In --prune mode
+// the renamed files' contents are rewritten too (entity, namespace and field
+// identifiers), so the developer-owned file keeps compiling after the rename.
+// Returns false when cleanup was deferred (non-interactive without --prune).
+func handleRename(ren snapshot.Rename, d *snapshot.Diff, fresh map[string]bool, log *logger.Logger, out io.Writer) (bool, error) {
 	selected := make(map[string]bool)
 
 	if prune {
@@ -549,6 +592,12 @@ func handleRename(ren snapshot.Rename, fresh map[string]bool, log *logger.Logger
 				continue
 			}
 			if renamed {
+				if rewrote, rerr := snapshot.RewriteFile(outputDir, newRel, snapshot.RenameTransforms(ren.OldName, ren.NewName, d)...); rerr != nil {
+					log.Warn("could not rewrite content of %s: %v", newRel, rerr)
+				} else if rewrote {
+					fmt.Fprintf(out, "  ▸ renamed %s -> %s (content updated)\n", f.Path, newRel)
+					continue
+				}
 				fmt.Fprintf(out, "  ▸ renamed %s -> %s\n", f.Path, newRel)
 			}
 			continue

@@ -82,7 +82,7 @@ entities:
 Prefer a visual editor over raw YAML? **DomainCraft Studio** is a browser-based canvas for designing your domain model — drag-and-drop entity diagrams, an entity inspector, a permission matrix, and a Monaco YAML editor with real-time two-way sync and instant validation. Everything you define in the Studio is a valid `domain.yaml`, so you can save it and run `domaincraft generate` on the result.
 
 - Open the hosted Studio: <https://domaincraft.github.io/domaincraft-studio/>
-- Or run it locally (see [DomainCraftGui](https://github.com/DomainCraft/domaincraft-studio)):
+- Or run it locally (see [domaincraft-studio](https://github.com/DomainCraft/domaincraft-studio)):
 
 Save (or copy) the resulting `domain.yaml` and generate as usual:
 
