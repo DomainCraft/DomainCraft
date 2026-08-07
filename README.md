@@ -315,7 +315,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for a complete step-by-step guide on cr
 ```
 DomainCraft/
 ├── cmd/
-│   ├── domaincraft/         # CLI entry point (Cobra): new, validate, generate, bridges
+│   ├── domaincraft/         # CLI entry point (Cobra): validate, generate, bridges, update
 │   ├── schema-gen/          # JSON schema generator for IDE autocomplete
 │   └── wasm-validator/      # Go WASM entry point exposing the validator + spec to the GUI
 ├── internal/

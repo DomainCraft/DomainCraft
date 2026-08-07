@@ -3,6 +3,7 @@ package snapshot
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/DomainCraft/DomainCraft/internal/ir"
@@ -276,6 +277,55 @@ func TestComputeDiffFieldRename(t *testing.T) {
 		t.Error("diff with a field rename must not be empty")
 	}
 }
+
+func TestComputeDiffChainedFieldRename(t *testing.T) {
+	// The developer renamed title -> name, generated, but NEVER applied the
+	// migration. Then they renamed name -> description and generated again. The
+	// previous snapshot shows that `name` was itself a rename (of `title`), so the
+	// new rename must be flagged as chained so the report can warn that the DB
+	// still holds the original column (`title`), not `name`.
+	old := &Snapshot{
+		Entities: map[string]EntityState{
+			"Product": {
+				Fields:        map[string]string{"id": "uuid", "name": "string"},
+				FieldOldNames: map[string]string{"name": "title"},
+			},
+		},
+	}
+
+	project := &ir.IRProject{
+		Entities: []ir.IREntity{
+			{
+				Name:       "Product",
+				NamePlural: "Products",
+				Fields: []ir.IRField{
+					{Name: "id", DatabaseType: "uuid", IsPrimary: true},
+					{
+						Name:                  "description",
+						OldName:               "name",
+						DatabaseType:          "string",
+						DatabaseColumnName:    "description",
+						OldDatabaseColumnName: "name",
+					},
+				},
+			},
+		},
+	}
+
+	diff := ComputeDiff(old, project, t.TempDir())
+	if len(diff.FieldRenames) != 1 {
+		t.Fatalf("got %d field renames, want 1", len(diff.FieldRenames))
+	}
+	fr := diff.FieldRenames[0]
+	if !fr.Chained {
+		t.Error("FieldRename.Chained = false, want true (source field was itself a rename)")
+	}
+	report := diff.FieldRenameReport()
+	if !strings.Contains(report, "WARNING") || !strings.Contains(report, "may never have been applied") {
+		t.Errorf("chained rename report should warn about the unapplied chain, got:\n%s", report)
+	}
+}
+
 
 func TestComputeDiffFieldRenameSkipsTypeChangeOnly(t *testing.T) {
 	dir := t.TempDir()

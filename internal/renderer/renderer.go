@@ -506,6 +506,25 @@ func (r *Renderer) shouldRenderContext(spec TemplateSpec, context RenderContext)
 			}
 		}
 		return false
+	case "hasSchemaRenames":
+		// True when any entity or entity field declares an `old_name` rename hint.
+		// Bridges use it to emit a data-preserving migration: RenameTable for renamed
+		// entities (their table name changes) and RenameColumn for renamed fields —
+		// EF Core would otherwise drop + re-create the table/column, destroying data.
+		if context.Project != nil {
+			for i := range context.Project.Entities {
+				e := &context.Project.Entities[i]
+				if e.OldName != "" {
+					return true
+				}
+				for j := range e.Fields {
+					if e.Fields[j].OldName != "" {
+						return true
+					}
+				}
+			}
+		}
+		return false
 	default:
 		return true
 	}

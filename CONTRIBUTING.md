@@ -126,7 +126,7 @@ templates:
 | `source` | yes | Path to template file relative to bridge directory |
 | `target` | yes | Output path pattern (supports Go template syntax) |
 | `targets` | no | Multiple output path patterns (alternative to `target`) |
-| `when` | no | Condition: `hasSeed`, `hasEnums`, `hasPermissions`, `hasOwnerTokens`, `hasAuth` |
+| `when` | no | Condition: `hasSeed`, `hasEnums`, `hasPermissions`, `hasOwnerTokens`, `hasAuth`, `hasSchemaRenames` |
 | `overwrite` | no | `false` = scaffold once (skip if the file exists); default `true`. These files are tracked as **custom** (developer-owned) by the migration engine |
 | `delimiters` | no | Custom template delimiters, e.g. `["<<", ">>"]` — use for bridges generating JSX/TSX where `{{ }}` conflicts with Go templates |
 

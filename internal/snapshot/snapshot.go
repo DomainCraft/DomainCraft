@@ -157,6 +157,11 @@ type FieldRename struct {
 	OldType     string
 	NewType     string
 	CustomFiles []string // custom (overwrite: false) file paths for the entity that still exist
+	// Chained is true when the previous field name was itself a rename in the
+	// prior snapshot, i.e. the developer renamed a field again before applying the
+	// previous rename's migration. The DB still holds the ORIGINAL column, so the
+	// generated rename target may not exist yet — the report warns about this.
+	Chained bool
 }
 
 // NamespaceMismatch reports custom (overwrite: false) files that still reference
@@ -312,6 +317,9 @@ func ComputeDiff(old *Snapshot, project *ir.IRProject, outputDir string) *Diff {
 				OldType:     oldFieldType,
 				NewType:     f.DatabaseType,
 				CustomFiles: customFiles,
+				// The source of this rename was itself a rename in the previous
+				// snapshot — the developer renamed again before applying it.
+				Chained: oldState.FieldOldNames[f.OldName] != "",
 			})
 		}
 	}
@@ -488,6 +496,13 @@ func (d *Diff) FieldRenameReport() string {
 	for i, fr := range d.FieldRenames {
 		fmt.Fprintf(&b, "%d. Entity: %s — field %s renamed to %s\n", i+1, fr.Entity, fr.OldField, fr.NewField)
 		fmt.Fprintf(&b, "   Column:   %s -> %s\n", fr.OldColumn, fr.NewColumn)
+		if fr.Chained {
+			fmt.Fprintf(&b, "   WARNING:  field %s was itself the target of a rename in the previous\n", fr.OldField)
+			fmt.Fprintf(&b, "             snapshot, and that rename may never have been applied. The DB still\n")
+			fmt.Fprintf(&b, "             holds the ORIGINAL column, so renaming %s -> %s may fail\n", fr.OldColumn, fr.NewColumn)
+			fmt.Fprintf(&b, "             because %s does not exist yet. Apply each rename's migration as\n", fr.OldColumn)
+			fmt.Fprintf(&b, "             you go (docker auto-migrate, --migrate, --prune).\n")
+		}
 		if fr.OldType != fr.NewType {
 			fmt.Fprintf(&b, "   Types:    %s -> %s (was a rename AND a type change)\n", fr.OldType, fr.NewType)
 		}
@@ -499,9 +514,10 @@ func (d *Diff) FieldRenameReport() string {
 		}
 	}
 	b.WriteString("\nIn a single migration, rename each column (RenameColumn) instead of letting EF\n")
-	b.WriteString("drop and re-add it — the generated code already writes the new column name, so a\n")
-	b.WriteString("RenameColumn is the only data-preserving step. `domaincraft generate --prune`\n")
-	b.WriteString("re-runs the bridge's migration commands automatically after a rename.\n")
+	b.WriteString("drop and re-add it — the generated code already writes the new column name.\n")
+	b.WriteString("The C# bridge ships the exact RenameTable / RenameColumn statements in a SchemaRenames\n")
+	b.WriteString("helper to call from your migration; `domaincraft generate --prune` also re-runs the\n")
+	b.WriteString("bridge's migration commands (best-effort) after a rename.\n")
 	return b.String()
 }
 

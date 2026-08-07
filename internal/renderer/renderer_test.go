@@ -283,3 +283,66 @@ func TestResolvePackagesNilLoggerDoesNotPanic(t *testing.T) {
 		t.Fatalf("resolvePackages() = %v, want no resolved versions on failure", got)
 	}
 }
+
+func TestRenderHasSchemaRenamesCondition(t *testing.T) {
+	render := func(project *ir.IRProject) []string {
+		tmpDir := t.TempDir()
+		bridgeDir := filepath.Join(tmpDir, "bridge")
+		if err := os.MkdirAll(filepath.Join(bridgeDir, "templates"), 0o755); err != nil {
+			t.Fatalf("mkdir bridge: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(bridgeDir, "bridge.yaml"), []byte(`name: demo
+templates:
+  - for: project
+    source: templates/renames.cs.tmpl
+    target: "renames.cs"
+    when: hasSchemaRenames
+`), 0o644); err != nil {
+			t.Fatalf("write bridge: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(bridgeDir, "templates", "renames.cs.tmpl"), []byte(`renames`), 0o644); err != nil {
+			t.Fatalf("write template: %v", err)
+		}
+		r, err := New(bridgeDir, nil)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		written, _, err := r.Render(project, filepath.Join(tmpDir, "out"))
+		if err != nil {
+			t.Fatalf("Render() error = %v", err)
+		}
+		return written
+	}
+
+	withFieldRename := &ir.IRProject{
+		Name: "P",
+		Entities: []ir.IREntity{{
+			Name: "Item", NamePlural: "Items",
+			Fields: []ir.IRField{{Name: "name", OldName: "title"}},
+		}},
+	}
+	if got := render(withFieldRename); len(got) != 1 {
+		t.Fatalf("hasSchemaRenames (field): want 1 file (renames.cs), got %d", len(got))
+	}
+
+	withEntityRename := &ir.IRProject{
+		Name: "P",
+		Entities: []ir.IREntity{{
+			Name: "Item", NamePlural: "Items", OldName: "Product",
+		}},
+	}
+	if got := render(withEntityRename); len(got) != 1 {
+		t.Fatalf("hasSchemaRenames (entity rename): want 1 file (renames.cs), got %d", len(got))
+	}
+
+	withoutRename := &ir.IRProject{
+		Name: "P",
+		Entities: []ir.IREntity{{
+			Name: "Item", NamePlural: "Items",
+			Fields: []ir.IRField{{Name: "name"}},
+		}},
+	}
+	if got := render(withoutRename); len(got) != 0 {
+		t.Fatalf("no field rename: want 0 files, got %d", len(got))
+	}
+}

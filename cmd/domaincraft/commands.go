@@ -181,7 +181,16 @@ func newGenerateCmd() *cobra.Command {
 			shouldMigrate := migrateFlag || (prune && migrationDiff.HasSchemaChanges())
 			if applied && shouldMigrate && rendererInstance.MigrationConfig() != nil && rendererInstance.MigrationConfig().Enabled {
 				if err := runDatabaseMigrations(rendererInstance.MigrationConfig(), outputDir, cmd, log); err != nil {
-					return err
+					if migrateFlag {
+						// Explicit --migrate: a failed migration is a hard error.
+						return err
+					}
+					// Auto-migration under --prune is best-effort. In a docker/CI
+					// workflow the API container applies pending migrations at startup
+					// (Database:SchemaMode=migrate → MigrateAsync), so a host without
+					// the dotnet SDK or an unreachable database must not abort generation.
+					log.Warn("Database migration was not applied by --prune: %v", err)
+					log.Warn("In docker, set Database:SchemaMode=migrate — the container applies pending migrations on startup.")
 				}
 			}
 
@@ -225,8 +234,9 @@ func newGenerateCmd() *cobra.Command {
 
 	// --admin [bridge-id] — optional value, defaults to "admin-alpine" when flag is present without value.
 	cmd.Flags().StringVar(&adminBridge, "admin", "", "generate admin panel (optionally specify bridge ID, default: admin-alpine)")
+	cmd.Flags().Lookup("admin").NoOptDefVal = "admin-alpine"
 	// --prune — automatically delete/rename orphaned files without prompting (CI).
-	cmd.Flags().BoolVar(&prune, "prune", false, "automatically remove/rename orphaned files and rewrite renamed identifiers in custom files, then run the bridge's database migrations when the schema changed (no prompts; CI-safe)")
+	cmd.Flags().BoolVar(&prune, "prune", false, "automatically remove/rename orphaned files and rewrite renamed identifiers in custom files, then run the bridge's database migrations (best-effort) when the schema changed (no prompts; CI-safe)")
 	// --migrate — after generation, run the bridge's declared database-migration commands.
 	cmd.Flags().BoolVar(&migrateFlag, "migrate", false, "run the bridge's database-migration commands after generation (e.g. dotnet ef database update)")
 
