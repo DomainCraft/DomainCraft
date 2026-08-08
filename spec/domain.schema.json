@@ -44,6 +44,10 @@
         "register": {
           "description": "Generate register endpoint (default: true)",
           "type": "boolean"
+        },
+        "setup": {
+          "description": "Generate /setup endpoint that bootstraps the first Admin (default: true)",
+          "type": "boolean"
         }
       },
       "title": "AuthEndpoints",
