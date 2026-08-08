@@ -144,6 +144,13 @@ func newGenerateCmd() *cobra.Command {
 			log.Success("Generated %d file(s) into %s", len(writtenFiles), outputDir)
 
 			// --- Admin panel generation ---
+			// pflag's NoOptDefVal makes `--admin <id>` stop consuming the next
+			// argument (it lands in args), so reclaim it here. This keeps both
+			// `--admin <path>` and `--admin=<path>` working while `--admin` alone
+			// still means the default admin-alpine bridge.
+			if cmd.Flags().Changed("admin") && adminBridge == "admin-alpine" && len(args) > 0 {
+				adminBridge = args[0]
+			}
 			if adminBridge == "" && !cmd.Flags().Changed("admin") && nonInteractive {
 				// In non-interactive mode, skip admin prompt — admin not requested.
 			} else if adminBridge == "" && !cmd.Flags().Changed("admin") && interactive.IsTerminal() {
@@ -232,7 +239,10 @@ func newGenerateCmd() *cobra.Command {
 		},
 	}
 
-	// --admin [bridge-id] — optional value, defaults to "admin-alpine" when flag is present without value.
+	// --admin [bridge-id] — optional value, defaults to "admin-alpine" when flag
+	// is present without a value. NoOptDefVal is used for the default, and the
+	// RunE handler reclaims a space-separated value from args so both
+	// `--admin <id>` and `--admin=<id>` work.
 	cmd.Flags().StringVar(&adminBridge, "admin", "", "generate admin panel (optionally specify bridge ID, default: admin-alpine)")
 	cmd.Flags().Lookup("admin").NoOptDefVal = "admin-alpine"
 	// --prune — automatically delete/rename orphaned files without prompting (CI).
