@@ -346,6 +346,406 @@ func TestComputeDiffFieldRenameSkipsTypeChangeOnly(t *testing.T) {
 	}
 }
 
+func TestComputeDiffDeletedEntityWithoutFiles(t *testing.T) {
+	dir := t.TempDir()
+	// Files are NOT created on disk — should filter them out.
+
+	old := &Snapshot{
+		Entities: map[string]EntityState{"Product": {Fields: map[string]string{"id": "uuid"}}},
+		Files: []renderer.RenderedFile{
+			{Path: "src/Domain/Entities/Product.cs", Entity: "Product"},
+			{Path: "src/Services/ProductService.cs", Entity: "Product", Custom: true},
+		},
+	}
+	project := testProject("User")
+
+	diff := ComputeDiff(old, project, dir)
+	if len(diff.Deleted) != 1 {
+		t.Fatalf("got %d deleted entities, want 1", len(diff.Deleted))
+	}
+	if len(diff.Deleted[0].Files) != 0 {
+		t.Errorf("got %d files (should be 0 — none exist on disk)", len(diff.Deleted[0].Files))
+	}
+}
+
+func TestComputeDiffMultipleDeletedEntities(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "src/Domain/Entities/Product.cs")
+	writeTestFile(t, dir, "src/Domain/Entities/Category.cs")
+	writeTestFile(t, dir, "src/Domain/Entities/Tag.cs")
+
+	old := &Snapshot{
+		Entities: map[string]EntityState{
+			"Product":  {Fields: map[string]string{"id": "uuid"}},
+			"Category": {Fields: map[string]string{"id": "uuid"}},
+			"Tag":      {Fields: map[string]string{"id": "uuid"}},
+			"User":     {Fields: map[string]string{"id": "uuid"}},
+		},
+		Files: []renderer.RenderedFile{
+			{Path: "src/Domain/Entities/Product.cs", Entity: "Product"},
+			{Path: "src/Domain/Entities/Category.cs", Entity: "Category"},
+			{Path: "src/Domain/Entities/Tag.cs", Entity: "Tag"},
+			{Path: "src/Domain/Entities/User.cs", Entity: "User"},
+		},
+	}
+	// Only User survives.
+	project := testProject("User")
+
+	diff := ComputeDiff(old, project, dir)
+	if len(diff.Deleted) != 3 {
+		t.Fatalf("got %d deleted entities, want 3 (Product, Category, Tag)", len(diff.Deleted))
+	}
+	// Product, Category, Tag in alphabetical order.
+	if diff.Deleted[0].Name != "Category" {
+		t.Errorf("first deleted = %q, want Category", diff.Deleted[0].Name)
+	}
+	if diff.Deleted[1].Name != "Product" {
+		t.Errorf("second deleted = %q, want Product", diff.Deleted[1].Name)
+	}
+	if diff.Deleted[2].Name != "Tag" {
+		t.Errorf("third deleted = %q, want Tag", diff.Deleted[2].Name)
+	}
+	// User is not deleted.
+	if !diff.HasSchemaChanges() {
+		t.Error("HasSchemaChanges() should be true when entities are deleted")
+	}
+	if diff.IsEmpty() {
+		t.Error("IsEmpty() should be false when entities are deleted")
+	}
+}
+
+func TestComputeDiffEntityRenameOnly(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "src/Domain/Entities/Product.cs")
+	writeTestFile(t, dir, "src/Services/ProductService.cs")
+
+	old := &Snapshot{
+		Entities: map[string]EntityState{
+			"Product": {Fields: map[string]string{"id": "uuid", "name": "string"}},
+		},
+		Files: []renderer.RenderedFile{
+			{Path: "src/Domain/Entities/Product.cs", Entity: "Product"},
+			{Path: "src/Services/ProductService.cs", Entity: "Product", Custom: true},
+		},
+	}
+
+	// Product -> Item, fields unchanged.
+	project := &ir.IRProject{
+		Entities: []ir.IREntity{
+			{
+				Name:       "Item",
+				OldName:    "Product",
+				NamePlural: "Items",
+				Fields: []ir.IRField{
+					{Name: "id", DatabaseType: "uuid", IsPrimary: true},
+					{Name: "name", DatabaseType: "string"},
+				},
+			},
+		},
+	}
+
+	diff := ComputeDiff(old, project, dir)
+	if len(diff.Renamed) != 1 {
+		t.Fatalf("got %d renames, want 1", len(diff.Renamed))
+	}
+	ren := diff.Renamed[0]
+	if ren.OldName != "Product" || ren.NewName != "Item" {
+		t.Errorf("rename = %q -> %q, want Product -> Item", ren.OldName, ren.NewName)
+	}
+	if len(ren.Files) != 2 {
+		t.Fatalf("got %d files for rename, want 2", len(ren.Files))
+	}
+	if len(diff.Deleted) != 0 {
+		t.Errorf("got %d deleted entities, want 0", len(diff.Deleted))
+	}
+	if len(diff.TypeChanges) != 0 {
+		t.Errorf("got %d type changes, want 0", len(diff.TypeChanges))
+	}
+	if len(diff.FieldRenames) != 0 {
+		t.Errorf("got %d field renames, want 0", len(diff.FieldRenames))
+	}
+}
+
+func TestComputeDiffEntityRenameWithoutFiles(t *testing.T) {
+	dir := t.TempDir()
+	// No files created on disk.
+
+	old := &Snapshot{
+		Entities: map[string]EntityState{
+			"Product": {Fields: map[string]string{"id": "uuid"}},
+		},
+		Files: []renderer.RenderedFile{
+			{Path: "src/Domain/Entities/Product.cs", Entity: "Product"},
+		},
+	}
+
+	project := &ir.IRProject{
+		Entities: []ir.IREntity{
+			{
+				Name:       "Item",
+				OldName:    "Product",
+				NamePlural: "Items",
+				Fields:     []ir.IRField{{Name: "id", DatabaseType: "uuid", IsPrimary: true}},
+			},
+		},
+	}
+
+	diff := ComputeDiff(old, project, dir)
+	if len(diff.Renamed) != 1 {
+		t.Fatalf("got %d renames, want 1", len(diff.Renamed))
+	}
+	if len(diff.Renamed[0].Files) != 0 {
+		t.Errorf("got %d files for rename, want 0 (files do not exist on disk)", len(diff.Renamed[0].Files))
+	}
+}
+
+func TestComputeDiffFieldRenameWithTypeChange(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "src/Services/ProductService.cs")
+
+	old := &Snapshot{
+		Entities: map[string]EntityState{
+			"Product": {
+				Fields:      map[string]string{"id": "uuid", "title": "string"},
+				FieldOldNames: map[string]string{},
+			},
+		},
+		Files: []renderer.RenderedFile{
+			{Path: "src/Services/ProductService.cs", Entity: "Product", Custom: true},
+		},
+	}
+
+	// title: string -> name: text [old_name: title] — rename AND type change.
+	project := &ir.IRProject{
+		Entities: []ir.IREntity{
+			{
+				Name:       "Product",
+				NamePlural: "Products",
+				Fields: []ir.IRField{
+					{Name: "id", DatabaseType: "uuid", IsPrimary: true},
+					{
+						Name:                  "name",
+						OldName:               "title",
+						DatabaseType:          "text",
+						DatabaseColumnName:    "name",
+						OldDatabaseColumnName: "title",
+					},
+				},
+			},
+		},
+	}
+
+	diff := ComputeDiff(old, project, dir)
+	if len(diff.FieldRenames) != 1 {
+		t.Fatalf("got %d field renames, want 1", len(diff.FieldRenames))
+	}
+	fr := diff.FieldRenames[0]
+	if fr.Entity != "Product" || fr.OldField != "title" || fr.NewField != "name" {
+		t.Errorf("field rename = %+v, want Product title->name", fr)
+	}
+	if fr.OldType != "string" || fr.NewType != "text" {
+		t.Errorf("types = %s -> %s, want string -> text", fr.OldType, fr.NewType)
+	}
+	if fr.Chained {
+		t.Error("Chained should be false (first rename)")
+	}
+	if len(fr.CustomFiles) != 1 || fr.CustomFiles[0] != "src/Services/ProductService.cs" {
+		t.Errorf("custom files = %v, want [src/Services/ProductService.cs]", fr.CustomFiles)
+	}
+
+	// A field rename should NOT also produce a type change entry.
+	if len(diff.TypeChanges) != 0 {
+		t.Errorf("got %d type changes, want 0 (should be covered by the field rename)", len(diff.TypeChanges))
+	}
+}
+
+func TestComputeDiffSimultaneousChanges(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "src/Domain/Entities/Item.cs")
+	writeTestFile(t, dir, "src/Services/ItemService.cs")
+	writeTestFile(t, dir, "src/Domain/Entities/Category.cs")
+	writeTestFile(t, dir, "src/Domain/Entities/User.cs")
+
+	old := &Snapshot{
+		Entities: map[string]EntityState{
+			"Product":  {Fields: map[string]string{"id": "uuid", "title": "string", "price": "int"}},
+			"Category": {Fields: map[string]string{"id": "uuid", "name": "string"}},
+			"User":     {Fields: map[string]string{"id": "uuid", "email": "string"}},
+		},
+		Files: []renderer.RenderedFile{
+			{Path: "src/Domain/Entities/Item.cs", Entity: "Product"},
+			{Path: "src/Services/ItemService.cs", Entity: "Product", Custom: true},
+			{Path: "src/Domain/Entities/Category.cs", Entity: "Category"},
+			{Path: "src/Domain/Entities/User.cs", Entity: "User"},
+		},
+	}
+
+	// Product -> Item (rename), title -> name (field rename), price int -> decimal (type change).
+	// Category: deleted.
+	// User: unchanged.
+	project := &ir.IRProject{
+		Entities: []ir.IREntity{
+			{
+				Name:       "Item",
+				OldName:    "Product",
+				NamePlural: "Items",
+				Fields: []ir.IRField{
+					{Name: "id", DatabaseType: "uuid", IsPrimary: true},
+					{
+						Name:                  "name",
+						OldName:               "title",
+						DatabaseType:          "string",
+						DatabaseColumnName:    "name",
+						OldDatabaseColumnName: "title",
+					},
+					{Name: "price", DatabaseType: "decimal", DatabaseColumnName: "price"},
+				},
+			},
+			{
+				Name:       "User",
+				NamePlural: "Users",
+				Fields: []ir.IRField{
+					{Name: "id", DatabaseType: "uuid", IsPrimary: true},
+					{Name: "email", DatabaseType: "string"},
+				},
+			},
+		},
+	}
+
+	diff := ComputeDiff(old, project, dir)
+
+	// 1 rename (Product -> Item).
+	if len(diff.Renamed) != 1 {
+		t.Errorf("got %d renames, want 1", len(diff.Renamed))
+	} else {
+		if diff.Renamed[0].OldName != "Product" || diff.Renamed[0].NewName != "Item" {
+			t.Errorf("rename = %q -> %q, want Product -> Item", diff.Renamed[0].OldName, diff.Renamed[0].NewName)
+		}
+	}
+
+	// 1 deleted (Category).
+	if len(diff.Deleted) != 1 {
+		t.Errorf("got %d deleted entities, want 1", len(diff.Deleted))
+	} else {
+		if diff.Deleted[0].Name != "Category" {
+			t.Errorf("deleted = %q, want Category", diff.Deleted[0].Name)
+		}
+	}
+
+	// 1 type change (price: int -> decimal).
+	if len(diff.TypeChanges) != 1 {
+		t.Errorf("got %d type changes, want 1", len(diff.TypeChanges))
+	} else {
+		tc := diff.TypeChanges[0]
+		if tc.Entity != "Item" || tc.Field != "price" || tc.OldType != "int" || tc.NewType != "decimal" {
+			t.Errorf("type change = %+v, want Item.price int->decimal", tc)
+		}
+	}
+
+	// 1 field rename (title -> name).
+	if len(diff.FieldRenames) != 1 {
+		t.Errorf("got %d field renames, want 1", len(diff.FieldRenames))
+	} else {
+		fr := diff.FieldRenames[0]
+		if fr.Entity != "Item" || fr.OldField != "title" || fr.NewField != "name" {
+			t.Errorf("field rename = %+v, want Item title->name", fr)
+		}
+	}
+
+	if !diff.HasSchemaChanges() {
+		t.Error("HasSchemaChanges() should be true with multiple changes")
+	}
+	if diff.IsEmpty() {
+		t.Error("IsEmpty() should be false with changes")
+	}
+}
+
+func TestComputeDiffMultipleRenames(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "src/Domain/Entities/Item.cs")
+	writeTestFile(t, dir, "src/Domain/Entities/Group.cs")
+
+	old := &Snapshot{
+		Entities: map[string]EntityState{
+			"Product":  {Fields: map[string]string{"id": "uuid"}},
+			"Category": {Fields: map[string]string{"id": "uuid"}},
+			"User":     {Fields: map[string]string{"id": "uuid"}},
+		},
+		Files: []renderer.RenderedFile{
+			{Path: "src/Domain/Entities/Item.cs", Entity: "Product"},
+			{Path: "src/Domain/Entities/Group.cs", Entity: "Category"},
+			{Path: "src/Domain/Entities/User.cs", Entity: "User"},
+		},
+	}
+
+	// Product -> Item, Category -> Group, User unchanged.
+	project := &ir.IRProject{
+		Entities: []ir.IREntity{
+			{
+				Name:       "Item",
+				OldName:    "Product",
+				NamePlural: "Items",
+				Fields:     []ir.IRField{{Name: "id", DatabaseType: "uuid", IsPrimary: true}},
+			},
+			{
+				Name:       "Group",
+				OldName:    "Category",
+				NamePlural: "Groups",
+				Fields:     []ir.IRField{{Name: "id", DatabaseType: "uuid", IsPrimary: true}},
+			},
+			{
+				Name:       "User",
+				NamePlural: "Users",
+				Fields:     []ir.IRField{{Name: "id", DatabaseType: "uuid", IsPrimary: true}},
+			},
+		},
+	}
+
+	diff := ComputeDiff(old, project, dir)
+	if len(diff.Renamed) != 2 {
+		t.Fatalf("got %d renames, want 2", len(diff.Renamed))
+	}
+	// Sorted by OldName: Category -> Group, then Product -> Item.
+	if diff.Renamed[0].OldName != "Category" || diff.Renamed[0].NewName != "Group" {
+		t.Errorf("first rename = %q -> %q, want Category -> Group", diff.Renamed[0].OldName, diff.Renamed[0].NewName)
+	}
+	if diff.Renamed[1].OldName != "Product" || diff.Renamed[1].NewName != "Item" {
+		t.Errorf("second rename = %q -> %q, want Product -> Item", diff.Renamed[1].OldName, diff.Renamed[1].NewName)
+	}
+	if len(diff.Deleted) != 0 {
+		t.Errorf("got %d deleted entities, want 0", len(diff.Deleted))
+	}
+}
+
+func TestComputeDiffExistingFileFiltersDeleted(t *testing.T) {
+	dir := t.TempDir()
+	// Only create A.cs — B.cs does not exist on disk.
+	writeTestFile(t, dir, "src/Services/A.cs")
+
+	old := &Snapshot{
+		Entities: map[string]EntityState{"Product": {Fields: map[string]string{"id": "uuid"}}},
+		Files: []renderer.RenderedFile{
+			{Path: "src/Services/A.cs", Entity: "Product"},
+			{Path: "src/Services/B.cs", Entity: "Product", Custom: true},
+		},
+	}
+	project := testProject("User")
+
+	diff := ComputeDiff(old, project, dir)
+	if len(diff.Deleted) != 1 {
+		t.Fatalf("got %d deleted entities, want 1", len(diff.Deleted))
+	}
+	if len(diff.Deleted[0].Files) != 1 {
+		t.Fatalf("got %d files, want 1 (only A.cs exists on disk)", len(diff.Deleted[0].Files))
+	}
+	if diff.Deleted[0].Files[0].Path != "src/Services/A.cs" {
+		t.Errorf("file path = %q, want src/Services/A.cs", diff.Deleted[0].Files[0].Path)
+	}
+	if diff.Deleted[0].Files[0].Custom {
+		t.Error("A.cs should not be marked custom")
+	}
+}
+
 func testProject(entityName string) *ir.IRProject {
 	return &ir.IRProject{
 		Entities: []ir.IREntity{
