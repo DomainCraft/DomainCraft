@@ -1,0 +1,368 @@
+# =============================================================================
+# DomainCraft Compliance Suite — Kitchen Sink
+#
+# This is the reference domain.yaml that exercises EVERY feature of DomainCraft's
+# spec. A bridge that passes the full k6 suite against the code generated from
+# this file is guaranteed to honor the DomainCraft contract end-to-end.
+#
+# Run:  domaincraft generate --domain compliance-suite/kitchen-sink.yaml --bridge <bridge>
+# =============================================================================
+project:
+  name: TestPlatform
+  description: Certification suite — every DomainCraft feature in one domain model.
+  version: 1.0.0
+  deploy:
+    domain: localhost
+    port: 9000
+  multi_tenancy:
+    enabled: true
+    mode: column
+  versioning:
+    enabled: true
+    default_version: 1.0
+  rate_limit:
+    enabled: true
+    policy: fixed
+    permit_limit: 400
+    window_seconds: 60
+  pagination:
+    default_page_size: 20
+    max_page_size: 200
+
+database: postgresql
+auth:
+  type: jwt
+  entity: User
+  roles: [Admin, Manager, Editor, User, Viewer]
+  endpoints:
+    login: true
+    register: true
+    me: true
+    setup: true
+api_style: rest
+
+enums:
+  OrderStatus:
+    - PENDING
+    - PROCESSING
+    - SHIPPED
+    - DELIVERED
+    - CANCELLED
+  DocumentStatus:
+    - Draft
+    - Review
+    - Published
+    - Archived
+  PaymentMethod:
+    - CreditCard
+    - DebitCard
+    - PayPal
+    - BankTransfer
+    - Crypto
+
+  ProductStatus:
+    - DRAFT
+    - PUBLISHED
+    - ARCHIVED
+
+  UserRole:
+    - Admin
+    - Manager
+    - Editor
+    - User
+    - Viewer
+
+entities:
+  # ---- Auth & Identity ------------------------------------------------------
+  User:
+    features: [audit, audit_log, soft_delete]
+    fields:
+      id: uuid [primary]
+      email: string [required, unique, email]
+      password: string [required, hidden]
+      firstName: string [required, min:2, max:50]
+      lastName: string [required, min:2, max:50]
+      phoneNumbers: array(string) [optional]
+      isActive: boolean [default:true]
+      role: enum(UserRole) [default:User]
+      lastLoginAt: datetime [optional]
+      dateOfBirth: date [optional]
+      loginCount: bigint [default:0]
+      rating: float [optional, gte:0, lt:6]
+      balance: decimal [optional, gte:0, default:"0"]
+      bio: text [optional]
+      tags: array(uuid) [optional]
+      favoriteDates: array(date) [optional]
+      metadata: jsonb [optional]
+      # self-referential FK (not a relation field — just a raw column for multitenancy)
+      tenantId: uuid [optional]
+
+    permissions:
+      read: [Admin, Manager, Editor, "@Owner", "*"]
+      create: ["@"]  # self-registration
+      update: ["@Owner", Admin, Manager]
+      delete: [Admin, Manager]
+
+  Role:
+    features: [audit]
+    fields:
+      id: uuid [primary]
+      name: string [required, unique, min:1, max:50]
+      slug: string [required, unique, regex:"^[a-z0-9-]+$"]
+      description: string [optional, max:255]
+
+    permissions:
+      read: ["*"]
+      create: [Admin, Manager]
+      update: [Admin, Manager]
+      delete: [Admin, Manager]
+
+  # ---- E-commerce core ------------------------------------------------------
+  Category:
+    features: [audit]
+    fields:
+      id: uuid [primary]
+      name: string [required, unique, min:3, max:100]
+      slug: string [required, unique, regex:"^[a-z0-9-]+$"]
+      isActive: boolean [default:true]
+      sortOrder: int [default:0]
+      parentId: relation(Category) [optional, on_delete:set_null]  # self-referential
+
+    permissions:
+      read: ["*"]
+      create: [Admin, Manager, Editor]
+      update: [Admin, Manager, Editor]
+      delete: [Admin, Manager]
+
+  Product:
+    features: [audit, audit_log, soft_delete, optimistic_lock]
+    fields:
+      id: uuid [primary]
+      sku: string [required, unique, regex:"^[A-Z0-9-]{8,20}$"]
+      title: string [required, min:5, max:200]
+      description: text [optional]
+      price: decimal [required, gte:0.01]
+      stock: int [required, default:0, gte:0]
+      weight: float [optional, gte:0]
+      status: enum(ProductStatus) [default:DRAFT]
+      # Entity-level enum declared at project scope
+      categoryId: relation(Category) [optional, on_delete:set_null]
+      supplierId: relation(User) [optional, on_delete:restrict]
+      tags: relation(Tag) [many]
+      images: array(string) [optional]
+      viewCount: bigint [default:0]
+      relatedProductIds: array(uuid) [optional]
+      supportedPaymentMethods: array(PaymentMethod) [optional]
+      internalNotes: string [hidden, optional]
+
+    indexes:
+      - fields: [status, categoryId]
+        type: btree
+      - fields: [title]
+        type: btree
+      - fields: [sku]
+        type: btree
+        unique: true
+
+    permissions:
+      read: ["*"]
+      create: [Admin, Manager, Editor]
+      update: [Admin, Manager, Editor]
+      delete: [Admin, Manager]
+
+    seed:
+      - { id: "550e8400-e29b-41d4-a716-446655440000", sku: "PRD-ABC123", title: "Sample Product", price: "99.99", stock: 100, status: "DRAFT" }
+
+  # ---- M:N relationship test -------------------------------------------------
+  Tag:
+    features: [audit]
+    fields:
+      id: uuid [primary]
+      name: string [required, unique, min:2, max:50]
+      slug: string [required, unique, regex:"^[a-z0-9-]+$"]
+      description: text [optional]
+      usageCount: bigint [default:0]
+
+    permissions:
+      read: ["*"]
+      create: [Admin, Manager, Editor]
+      update: [Admin, Manager, Editor]
+      delete: [Admin, Manager]
+
+  ProductTag:
+    features: [audit]
+    fields:
+      id: uuid [primary]
+      productId: relation(Product) [required, on_delete:cascade]
+      tagId: relation(Tag) [required, on_delete:cascade]
+
+    permissions:
+      read: ["*"]
+      create: [Admin, Manager, Editor]
+      update: [Admin, Manager]
+      delete: [Admin, Manager]
+
+  # ---- 1:N with cascade -----------------------------------------------------
+  Order:
+    features: [audit_log, soft_delete, optimistic_lock]
+    fields:
+      id: uuid [primary, old_name:oid]
+      orderNumber: string [required, unique]
+      userId: relation(User) [required, on_delete:restrict]
+      status: enum(OrderStatus) [default:PENDING]
+      totalAmount: decimal [required, gte:0]
+      notes: string [optional, max:1000]
+      shippingAddress: json [optional]
+      items: relation(OrderItem) [many]
+      trackingNumbers: array(string) [optional]
+      estimatedDeliveryDates: array(datetime) [optional]
+      paidAt: datetime [optional]
+      subtotal: decimal [required, gte:0]
+      tax: decimal [optional, gte:0]
+
+    permissions:
+      read: [Admin, Manager, "@Owner"]
+      create: [User]
+      update: ["@Owner", Admin, Manager]
+      delete: [Admin, Manager]
+
+  OrderItem:
+    features: [audit]
+    fields:
+      id: uuid [primary]
+      orderId: relation(Order) [required, on_delete:cascade]
+      productId: relation(Product) [required, on_delete:restrict]
+      quantity: int [required, gte:1]
+      unitPrice: decimal [required, gte:0]
+      discount: decimal [optional, default:0, gte:0, lt:100]
+      price: decimal [required, gte:0]
+
+    permissions:
+      read: [Admin, Manager, "@Owner"]
+      create: [User]
+      update: [Admin, Manager]
+      delete: [Admin, Manager]
+
+  # ---- Reviews & ratings ----------------------------------------------------
+  Review:
+    features: [audit_log, soft_delete, optimistic_lock]
+    fields:
+      id: uuid [primary]
+      productId: relation(Product) [required, on_delete:cascade]
+      userId: relation(User) [required, on_delete:cascade]
+      rating: int [required, gte:1, lte:5]
+      title: string [required, min:5, max:100]
+      content: text [optional]
+      isVerifiedPurchase: boolean [default:false]
+      helpfulCount: int [default:0]
+      # readonly field for testing
+      sentiment: string [optional, readonly]
+
+    indexes:
+      - fields: [productId, rating]
+        type: btree
+      - fields: [userId, rating]
+        type: btree
+
+    permissions:
+      read: ["*"]
+      create: [User]
+      update: ["@Owner"]
+      delete: [Admin, "@Owner"]
+
+  # ---- Documents & folders (self-ref + 1:1-ish) ----------------------------
+  Folder:
+    features: [audit]
+    fields:
+      id: uuid [primary]
+      name: string [required, min:2, max:200]
+      parentId: relation(Folder) [optional, on_delete:set_null]
+      slug: string [required, unique, regex:"^[a-z0-9-]+$"]
+      isActive: boolean [default:true]
+      ownerId: relation(User) [optional, on_delete:restrict]
+      sortOrder: int [default:0]
+
+    permissions:
+      read: [Admin, Manager, Editor, "@Owner", "*"]
+      create: [Admin, Manager]
+      update: ["@Owner", Admin, Manager]
+      delete: [Admin, Manager]
+
+  Document:
+    features: [audit_log, soft_delete, optimistic_lock]
+    fields:
+      id: uuid [primary]
+      title: string [required, min:5, max:255]
+      content: text
+      status: enum(DocumentStatus) [default:Draft]
+      folderId: relation(Folder) [optional, on_delete:set_null]
+      authorId: relation(User) [required, on_delete:restrict]
+      isPublished: boolean [default:false]
+      internalNotes: string [hidden, optional]
+      publishedAt: datetime [optional]
+      fileSize: bigint [default:0]
+      checksum: string [optional, max:64]
+      metadata: jsonb [optional]
+      version: int [default:1]
+
+    permissions:
+      read: [Admin, Manager, Editor, "@Owner"]
+      create: [User, Admin]
+      update: ["@Owner", Admin, Manager]
+      delete: [Admin, Manager]
+
+  # ---- Payments -------------------------------------------------------------
+  Payment:
+    features: [audit, optimistic_lock]
+    fields:
+      id: uuid [primary]
+      orderId: relation(Order) [required, on_delete:restrict]
+      amount: decimal [required, gt:0]
+      method: enum(PaymentMethod) [required]
+      status: string [required, default:"pending"]
+      transactionId: string [optional, unique, max:255]
+      paidAt: datetime [optional]
+      refundAmount: decimal [optional, gte:0]
+      metadata: jsonb [optional]
+      attemptCount: int [default:1]
+
+    permissions:
+      read: [Admin, Manager]
+      create: [Admin, Manager]
+      update: [Admin, Manager]
+      delete: [Admin]
+
+  # ---- 1:1 relationship (UserProfile) --------------------------------------
+  UserProfile:
+    features: [audit]
+    fields:
+      id: uuid [primary]
+      userId: relation(User) [required, unique, on_delete:cascade]
+      displayName: string [required, min:2, max:100]
+      avatarUrl: string [optional, url]
+      timezone: string [optional, default:"UTC"]
+      receiveNotifications: boolean [default:true]
+
+    permissions:
+      read: [Admin, Manager, "@Owner", "*"]
+      create: [User]
+      update: ["@Owner", Admin]
+      delete: [Admin]
+
+  # ---- Event sourcing & cacheable features ---------------------------------
+  EventLog:
+    features: [audit, event_sourced, cacheable]
+    fields:
+      id: uuid [primary]
+      aggregateId: uuid [required]
+      eventType: string [required, min:1, max:100]
+      payload: jsonb
+      timestamp: datetime [default:now()]
+      correlationId: uuid [optional]
+      userId: relation(User) [optional, on_delete:set_null]
+
+    permissions:
+      read: [Admin, Manager]
+      create: ["*"]
+      update: [Admin]
+      delete: [Admin]

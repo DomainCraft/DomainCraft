@@ -1,0 +1,96 @@
+# DomainCraft Bridge Certification (TCK) CI Template
+#
+# Copy this file into your bridge repository at .github/workflows/certification.yml
+# and adjust the `bridge_path:` input below if your templates are not at the repo root.
+#
+# This workflow downloads the DomainCraft core + compliance-suite, generates code
+# from kitchen-sink.yaml using your bridge templates, starts the app + database
+# via Docker Compose, and runs the k6 certification suite against it.
+#
+# The compliance-suite is maintained in the DomainCraft/core repository so that
+# every new check is automatically inherited by all certified bridges.
+# ---
+name: Bridge Certification (TCK)
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  # Core repo ref to checkout (branch or tag). Use a release tag like v1.2.3 to
+  # lock the TCK version, or leave as `main` to always run against the latest.
+  CORE_VERSION: main
+  # Port the generated app listens on. Must match `project.deploy.port` in
+  # kitchen-sink.yaml (the compliance suite is generated from that file).
+  API_PORT: 9000
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Checkout the bridge (templates) under test.
+      - name: Checkout Bridge
+        uses: actions/checkout@v4
+
+      # 2. Checkout the DomainCraft core (compliance-suite + k6 script) and
+      #    install the CLI from the matching release in one go.
+      - name: Checkout Core
+        uses: actions/checkout@v4
+        with:
+          repository: DomainCraft/DomainCraft
+          path: core
+          ref: ${{ env.CORE_VERSION }}
+
+      # 3. Set up Go. ubuntu-latest (24.04) does NOT ship a preinstalled Go,
+      #    and the core requires Go 1.25+ (see go.mod).
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      # 4. Build & install the CLI. `main` maps to the latest release; a pinned
+      #    CORE_VERSION (e.g. v1.2.3) installs that exact release.
+      - name: Install DomainCraft CLI
+        run: |
+          go install github.com/DomainCraft/DomainCraft/cmd/domaincraft@${{ env.CORE_VERSION == 'main' && 'latest' || env.CORE_VERSION }}
+
+      # 5. Generate code from the kitchen-sink domain using the current bridge.
+      - name: Generate Code
+        run: |
+          # Adjust bridge_path if your templates live in a subdirectory.
+          bridge_path="."
+          domaincraft generate \
+            --domain ./core/compliance-suite/kitchen-sink.yaml \
+            --bridge "$bridge_path" \
+            --output ./test-app \
+            --non-interactive
+
+      # 6. Build & start the generated application (API + DB).
+      - name: Start Application
+        working-directory: ./test-app
+        run: |
+          docker compose up -d --build
+          # Wait for the API to become healthy. The generated app listens on
+          # $API_PORT (9000 by default — see project.deploy.port).
+          timeout 120 bash -c 'until [[ "$(curl -s -o /dev/null -w ''%{http_code}'' http://localhost:${API_PORT}/health/ready)" == "200" ]]; do sleep 2; done' || {
+            echo "::error::API did not become healthy in time"
+            docker compose logs --tail=100 api || true
+            exit 1
+          }
+
+      # 7. Install k6 (official Grafana action).
+      - name: Install k6
+        uses: grafana/setup-k6-action@v1
+
+      # 8. Run the k6 certification suite.
+      - name: Run Certification Suite
+        run: |
+          k6 run -e API_URL=http://localhost:${API_PORT} ./core/compliance-suite/suite.js
+
+      # 9. Cleanup.
+      - name: Stop Application
+        if: always()
+        working-directory: ./test-app
+        run: docker compose down --volumes --remove-orphans

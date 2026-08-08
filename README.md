@@ -9,6 +9,10 @@ DomainCraft is a domain-driven code generator. You describe your entities, relat
 project:
   name: MyShop
 
+auth:
+  type: jwt
+  roles: [Admin, User]
+
 entities:
   Product:
     features: [audit, soft_delete]
@@ -310,6 +314,32 @@ Downloaded bridges are cached locally, so generating again never re-clones the r
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for a complete step-by-step guide on creating bridges for any language.
 
+### Bridge Certification (Compliance Suite)
+
+`compliance-suite/` contains the **Technology Compatibility Kit (TCK)** — a hand-written, language-agnostic test suite that verifies a bridge implements the DomainCraft contract correctly:
+
+| File | Purpose |
+|------|---------|
+| `kitchen-sink.yaml` | A maximal domain model exercising every core feature: all field types, enums, relations (incl. 1:1 and many-to-many), features, permissions with `@Owner`, indexes, seed data, auth, jsonb, versioning, rate limiting |
+| `suite.js` | A [k6](https://k6.io) script that runs against the *generated* app over HTTP and asserts the full contract: status codes (200/201/204/400/401/403/404/409/429), role-based access, `@Owner` isolation, hidden/readonly fields, optimistic-lock concurrency, seed data, validation errors |
+| `certification.yml` | A ready-to-copy **GitHub Actions workflow for bridge repositories** — downloads the core, generates from `kitchen-sink.yaml` with your bridge, starts the app via Docker Compose, runs `suite.js` |
+
+**Certify your bridge:** copy `compliance-suite/certification.yml` into `<your-bridge>/.github/workflows/certification.yml` (adjust `bridge_path` if templates aren't at the repo root). The suite is maintained in the core, so every new check is automatically inherited by all certified bridges.
+
+**Run locally:**
+
+```bash
+cd DomainCraft
+go build -o bin/domaincraft ./cmd/domaincraft
+./bin/domaincraft generate --domain compliance-suite/kitchen-sink.yaml --bridge ../domaincraft-bridge-csharp --output /tmp/tck-app --non-interactive
+cd /tmp/tck-app && docker compose up -d --build
+k6 run -e API_URL=http://localhost:9000 ../DomainCraft/compliance-suite/suite.js
+```
+
+The suite is re-run tolerant (unique skus/order numbers per run, 201-or-409 tolerances), so a second run against a non-reset database stays green.
+
+> **Why hand-written?** The suite is an *independent oracle* — written by humans against the contract. If it were generated from the same IR as the bridge's code, a bridge bug would reproduce itself in the test. Trust the core (unit-tested, deterministic); verify the bridge against it.
+
 ## Project Structure
 
 ```
@@ -357,9 +387,9 @@ domaincraft --version      # Print the CLI version
 --domain, -d      Path to domain.yaml (default: domain.yaml)
 --bridge, -b      Bridge ID, path, or owner/repo
 --output, -o      Output directory (default: generated)
---admin           Generate an admin panel (optional bridge ID, default: admin-alpine)
+--admin           Generate an admin panel (optional bridge ID, default: admin-alpine; generate only)
 --addons          Infrastructure accelerators (comma-separated, e.g. "dapr")
---prune           Apply migration cleanup automatically without prompts (CI)
+--prune           Apply migration cleanup automatically without prompts (CI; generate only)
 --migrate         Run the bridge's database-migration commands after generation (generate only)
 --update-bridges  Download newer versions of cached bridges before generating (no prompts, CI)
 --check-updates   Report outdated cached bridges (bridges only)
