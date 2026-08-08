@@ -249,6 +249,7 @@ func buildSchema() map[string]any {
 					"login":    map[string]any{"type": "boolean", "description": "Generate login endpoint (default: true)"},
 					"register": map[string]any{"type": "boolean", "description": "Generate register endpoint (default: true)"},
 					"me":       map[string]any{"type": "boolean", "description": "Generate /me endpoint (default: true)"},
+					"setup":    map[string]any{"type": "boolean", "description": "Generate /setup endpoint that bootstraps the first Admin (default: true)"},
 				},
 			},
 		},

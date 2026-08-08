@@ -65,6 +65,7 @@ type AuthEndpoints struct {
 	Login    *bool `yaml:"login" json:"login"`
 	Register *bool `yaml:"register" json:"register"`
 	Me       *bool `yaml:"me" json:"me"`
+	Setup    *bool `yaml:"setup" json:"setup"`
 }
 
 // HasLogin returns true if login endpoint is enabled (default: true).
@@ -75,6 +76,9 @@ func (e AuthEndpoints) HasRegister() bool { return e.Register == nil || *e.Regis
 
 // HasMe returns true if me endpoint is enabled (default: true).
 func (e AuthEndpoints) HasMe() bool { return e.Me == nil || *e.Me }
+
+// HasSetup returns true if setup endpoint is enabled (default: true).
+func (e AuthEndpoints) HasSetup() bool { return e.Setup == nil || *e.Setup }
 
 // DeployConfig represents deployment configuration.
 type DeployConfig struct {

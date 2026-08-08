@@ -517,6 +517,7 @@ func convertAuth(source *parser.AuthConfig, schema *parser.ParsedSchema) *IRAuth
 	login := source.Endpoints.HasLogin()
 	register := source.Endpoints.HasRegister()
 	me := source.Endpoints.HasMe()
+	setup := source.Endpoints.HasSetup()
 
 	return &IRAuthConfig{
 		Type:   source.Type,
@@ -526,6 +527,7 @@ func convertAuth(source *parser.AuthConfig, schema *parser.ParsedSchema) *IRAuth
 			HasLogin:    login,
 			HasRegister: register,
 			HasMe:       me,
+			HasSetup:    setup,
 		},
 	}
 }

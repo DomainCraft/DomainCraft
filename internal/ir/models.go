@@ -78,6 +78,7 @@ type IRAuthEndpoints struct {
 	HasLogin    bool
 	HasRegister bool
 	HasMe       bool
+	HasSetup    bool
 }
 
 // HasAuth returns true if authentication is enabled.
