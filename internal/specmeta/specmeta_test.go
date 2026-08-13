@@ -337,6 +337,7 @@ func TestIsDatabase(t *testing.T) {
 		{"sqlite", true},
 		{"mssql", true},
 		{"mongodb", true},
+		{"appwrite", true},
 		{"PostgreSQL", false}, // case-sensitive
 		{"oracle", false},
 		{"", false},

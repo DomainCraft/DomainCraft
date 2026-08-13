@@ -26,6 +26,13 @@ var DefaultRegistry = []RegistryEntry{
 		Language:    "HTML",
 		GitHub:      "DomainCraft/domaincraft-bridge-admin",
 	},
+	{
+		ID:          "appwrite",
+		Name:        "Appwrite (TablesDB)",
+		Description: "Appwrite schema: TablesDB + role teams + settings in one appwrite.config.json, deployed via the Appwrite CLI",
+		Language:    "JSON",
+		GitHub:      "DomainCraft/domaincraft-bridge-appwrite",
+	},
 }
 
 // Registry provides lookup methods over a set of bridge entries.

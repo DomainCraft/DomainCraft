@@ -435,7 +435,8 @@
         "mysql",
         "sqlite",
         "mssql",
-        "mongodb"
+        "mongodb",
+        "appwrite"
       ],
       "type": "string"
     },

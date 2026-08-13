@@ -12,7 +12,7 @@ type FeatureFieldDef struct {
 	DefaultValue  string `json:"defaultValue"`
 }
 
-var Databases = []string{"postgresql", "mysql", "sqlite", "mssql", "mongodb"}
+var Databases = []string{"postgresql", "mysql", "sqlite", "mssql", "mongodb", "appwrite"}
 
 var APIStyles = []string{"rest", "graphql", "grpc"}
 
