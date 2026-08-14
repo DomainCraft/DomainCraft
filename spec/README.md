@@ -1,6 +1,13 @@
 # Spec
 
-This folder contains the generated JSON Schema for `domain.yaml`.
+This folder contains the generated JSON Schema for `domain.yaml` plus the
+language-agnostic contracts the core exposes to every bridge:
+
+- `query.md` — the query grammar (filter, sort, pagination, search) and the
+  schema the core emits for a bridge's runtime validator.
+- `errors.md` — the stable validation-rule codes/messages and the
+  operation-error / pagination envelope contract.
+- `domain.schema.json` — the generated JSON Schema for `domain.yaml`.
 
 ## Regenerate schema and GUI types
 

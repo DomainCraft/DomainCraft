@@ -14,6 +14,7 @@ import (
 	"github.com/DomainCraft/DomainCraft/internal/ir"
 	"github.com/DomainCraft/DomainCraft/internal/parser"
 	"github.com/DomainCraft/DomainCraft/internal/renderer"
+	"github.com/DomainCraft/DomainCraft/internal/seed"
 	"github.com/DomainCraft/DomainCraft/internal/snapshot"
 	"github.com/DomainCraft/DomainCraft/internal/specmeta"
 	"github.com/DomainCraft/DomainCraft/internal/validator"
@@ -130,11 +131,26 @@ func newGenerateCmd() *cobra.Command {
 			}
 			migrationDiff := snapshot.ComputeDiff(oldSnapshot, irProject, outputDir)
 
+			// --- Abstract schema migration plan (smart core / dumb bridge) ---
+			// The core compares the previous model against the current one and
+			// emits a language-agnostic migration tree the bridge renders.
+			migrationPlan := snapshot.ComputeMigrationPlan(oldSnapshot, irProject)
+
+			// --- Seed data (smart core / dumb bridge) ---
+			// Two producers share one typed shape (ir.SeedRecord): the developer's
+			// explicit `seed:` rows (Normalize) and deterministic generated mock
+			// seed (Generate). A bridge serializes both through one code path.
+			seedData := seed.Normalize(irProject)
+			mockDataset := seed.Generate(irProject, seed.Options{})
+
 			log.Info("Rendering via %s", bridgePath)
 			rendererInstance, err := renderer.New(bridgePath, log)
 			if err != nil {
 				return err
 			}
+			rendererInstance.SetMigration(migrationPlan)
+			rendererInstance.SetSeedData(seedData)
+			rendererInstance.SetMockData(mockDataset)
 
 			writtenFiles, manifest, err := rendererInstance.Render(irProject, outputDir)
 			if err != nil {
@@ -160,7 +176,7 @@ func newGenerateCmd() *cobra.Command {
 				}
 			}
 			if adminBridge != "" {
-				adminManifest, err := generateAdminPanel(irProject, log)
+				adminManifest, err := generateAdminPanel(irProject, seedData, mockDataset, log)
 				if err != nil {
 					return err
 				}
@@ -375,7 +391,7 @@ func versionDelta(u *bridge.Update) string {
 
 // generateAdminPanel renders the optional admin panel bridge into the output
 // directory and returns the extra file manifest entries.
-func generateAdminPanel(irProject *ir.IRProject, log *logger.Logger) ([]renderer.RenderedFile, error) {
+func generateAdminPanel(irProject *ir.IRProject, seedData, mockDataset *ir.SeedDataset, log *logger.Logger) ([]renderer.RenderedFile, error) {
 	resolver := bridge.NewResolver(bridge.Default()).WithEnsureOptions(bridgeEnsureOptions(log))
 
 	adminID := adminBridge
@@ -393,6 +409,8 @@ func generateAdminPanel(irProject *ir.IRProject, log *logger.Logger) ([]renderer
 	if err != nil {
 		return nil, err
 	}
+	adminRenderer.SetSeedData(seedData)
+	adminRenderer.SetMockData(mockDataset)
 
 	adminFiles, adminManifest, err := adminRenderer.Render(irProject, outputDir)
 	if err != nil {

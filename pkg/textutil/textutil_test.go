@@ -16,9 +16,9 @@ func TestPluralize(t *testing.T) {
 		{"Tax", "Taxes"},
 		{"Quiz", "Quizzes"},
 		{"Hero", "Heroes"},
-		{"Day", "Days"},     // y after vowel -> -s
-		{"Key", "Keys"},     // y after vowel -> -s
-		{"Dish", "Dishes"},  // -sh -> -es
+		{"Day", "Days"},    // y after vowel -> -s
+		{"Key", "Keys"},    // y after vowel -> -s
+		{"Dish", "Dishes"}, // -sh -> -es
 	}
 	for _, tt := range tests {
 		got := Pluralize(tt.input)
@@ -40,12 +40,29 @@ func TestSingularize(t *testing.T) {
 		{"Quizzes", "Quiz"},
 		{"Statuses", "Status"},
 		{"Tags", "Tag"},
-		{"User", "User"},    // no change
+		{"User", "User"}, // no change
 	}
 	for _, tt := range tests {
 		got := Singularize(tt.input)
 		if got != tt.want {
 			t.Errorf("Singularize(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestFKName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"order", "orderId"},
+		{"orderId", "orderId"},
+		{"orderid", "orderid"},
+		{"ipv4Address", "ipv4AddressId"},
+	}
+	for _, tt := range tests {
+		if got := FKName(tt.input); got != tt.want {
+			t.Errorf("FKName(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }

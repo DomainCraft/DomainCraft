@@ -1,6 +1,11 @@
 package ir
 
-import "github.com/DomainCraft/DomainCraft/internal/specmeta"
+import (
+	"strings"
+
+	"github.com/DomainCraft/DomainCraft/internal/specmeta"
+	"github.com/DomainCraft/DomainCraft/pkg/textutil"
+)
 
 // IRProject represents the intermediate project model.
 type IRProject struct {
@@ -50,21 +55,6 @@ func (p *IRProject) HasAddon(name string) bool {
 	return p.Addons[name]
 }
 
-// HasInfraQueue returns true when a message broker is declared.
-func (p *IRProject) HasInfraQueue() bool {
-	return p.Infrastructure != nil && p.Infrastructure.Queue != "" && p.Infrastructure.Queue != "in-memory"
-}
-
-// HasInfraStorage returns true when an object/file storage is declared.
-func (p *IRProject) HasInfraStorage() bool {
-	return p.Infrastructure != nil && p.Infrastructure.Storage != "" && p.Infrastructure.Storage != "local"
-}
-
-// HasInfraCache returns true when a distributed cache store is declared.
-func (p *IRProject) HasInfraCache() bool {
-	return p.Infrastructure != nil && p.Infrastructure.Cache != "" && p.Infrastructure.Cache != "in-memory"
-}
-
 // IRAuthConfig represents authentication configuration in IR.
 type IRAuthConfig struct {
 	Type      string
@@ -84,6 +74,22 @@ type IRAuthEndpoints struct {
 // HasAuth returns true if authentication is enabled.
 func (p *IRProject) HasAuth() bool {
 	return p.Auth != nil && p.Auth.Type != "" && p.Auth.Type != "none"
+}
+
+// AuthEntity returns the resolved authentication entity (the entity that owns
+// email/password and drives the login/register/me/setup flow), or nil when auth
+// is disabled or the entity could not be found. Bridges use this instead of
+// scanning Project.Entities for the auth entity.
+func (p *IRProject) AuthEntity() *IREntity {
+	if p == nil || !p.HasAuth() || p.Auth == nil {
+		return nil
+	}
+	for i := range p.Entities {
+		if p.Entities[i].Name == p.Auth.Entity {
+			return &p.Entities[i]
+		}
+	}
+	return nil
 }
 
 // IRCacheConfig represents cache configuration in IR.
@@ -159,18 +165,18 @@ type IRField struct {
 	// OldDatabaseColumnName is the snake_case column name of OldName. Bridges use
 	// it to emit a safe RenameColumn instead of DropColumn + AddColumn.
 	OldDatabaseColumnName string
-	NavigationName     string // resolved navigation property name (for relation fields)
-	IsPrimary          bool
-	IsNullable         bool
-	IsUnique           bool
-	IsHidden           bool
-	IsReadonly         bool
-	IsRelation         bool
-	IsMany             bool
-	RelationTarget     string
-	DefaultValue       string
-	DefaultIsFunc      bool
-	Validations        []IRValidation
+	NavigationName        string // resolved navigation property name (for relation fields)
+	IsPrimary             bool
+	IsNullable            bool
+	IsUnique              bool
+	IsHidden              bool
+	IsReadonly            bool
+	IsRelation            bool
+	IsMany                bool
+	RelationTarget        string
+	DefaultValue          string
+	DefaultIsFunc         bool
+	Validations           []IRValidation
 }
 
 // NonRelationFields returns only scalar/non-relation fields (excludes relation FK fields).
@@ -195,12 +201,84 @@ func (e IREntity) RelationFields() []IRField {
 	return result
 }
 
+// EagerLoadRelations returns the relations a bridge should eager-load when
+// fetching a full entity graph (list / by-id): every outgoing relation. Bridges
+// iterate this instead of re-deriving the Include set, and call
+// EagerLoadNavigation() on each relation for the property to Include.
+func (e IREntity) EagerLoadRelations() []IRRelation {
+	return e.RelationsOut
+}
+
+// EagerLoadNavigation returns the navigation property name used to Include a
+// relation: the collection property for a [many] relation, the navigation
+// property for a single foreign key. Bridges apply their own casing
+// (pascalcase, camelcase, ...) to the returned name.
+func (r IRRelation) EagerLoadNavigation() string {
+	if r.IsMany {
+		return r.FieldName
+	}
+	return r.NavigationName
+}
+
+// TableName returns the entity's snake_case database table name. It is the
+// single source of truth for the table name — bridges must print this instead of
+// re-deriving it with their own snake_case (sprig `snakecase` diverges from
+// textutil.ToDatabaseColumnName on acronyms, e.g. `IPv4Address`).
+func (e IREntity) TableName() string {
+	return textutil.ToDatabaseColumnName(e.NamePlural)
+}
+
+// ForeignKeyColumnName returns the snake_case DB column name of this relation's
+// foreign key (fieldName + "Id", snake_cased). Bridges must print this instead
+// of `fkName .FieldName | snakecase`, which diverges from the core's column-name
+// algorithm on acronyms.
+func (r IRRelation) ForeignKeyColumnName() string {
+	return textutil.ToDatabaseColumnName(textutil.FKName(r.FieldName))
+}
+
+// ColumnName returns the field's canonical snake_case DB column name: the FK
+// column name for a relation field, the parser-computed DatabaseColumnName for a
+// scalar field (falling back to ToDatabaseColumnName(Name) when empty). This is
+// the single source of truth a bridge or the migration engine uses so it never
+// re-derives a column name with its own snake_case function.
+func (f IRField) ColumnName() string {
+	if f.IsRelation {
+		return textutil.ToDatabaseColumnName(textutil.FKName(f.Name))
+	}
+	if f.DatabaseColumnName != "" {
+		return f.DatabaseColumnName
+	}
+	return textutil.ToDatabaseColumnName(f.Name)
+}
+
 // HasFeature returns true if the entity has the named feature enabled.
 func (e IREntity) HasFeature(name string) bool {
 	if e.Features != nil {
 		return e.Features[name]
 	}
 	return false
+}
+
+// PrimaryKey returns the entity's primary key field, or nil when none is marked.
+func (e IREntity) PrimaryKey() *IRField {
+	for i := range e.Fields {
+		if e.Fields[i].IsPrimary {
+			return &e.Fields[i]
+		}
+	}
+	return nil
+}
+
+// FieldByName returns the field with the given name (case-insensitive), or nil.
+// Bridges use this to resolve a seed/column name back to its IRField without
+// re-implementing the lookup.
+func (e IREntity) FieldByName(name string) *IRField {
+	for i := range e.Fields {
+		if strings.EqualFold(e.Fields[i].Name, name) {
+			return &e.Fields[i]
+		}
+	}
+	return nil
 }
 
 // HasAudit returns true if the entity has the audit feature enabled.

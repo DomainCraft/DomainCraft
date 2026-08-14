@@ -275,11 +275,12 @@ func newFeatureField(name string, def specmeta.FeatureFieldDef) *ParsedField {
 
 // generateIndexName generates an index name from entity name and fields
 func generateIndexName(entityName string, fields []string, idx int) string {
-	fieldsPart := strings.Join(fields, "_")
-	return fmt.Sprintf("idx_%s_%s_%d",
-		strings.ToLower(entityName),
-		strings.ToLower(fieldsPart),
-		idx)
+	parts := make([]string, 0, len(fields)+1)
+	parts = append(parts, textutil.ToDatabaseColumnName(entityName))
+	for _, f := range fields {
+		parts = append(parts, textutil.ToDatabaseColumnName(f))
+	}
+	return fmt.Sprintf("idx_%s_%d", strings.Join(parts, "_"), idx)
 }
 
 // ParseYAML is a convenience function for full parsing from YAML bytes

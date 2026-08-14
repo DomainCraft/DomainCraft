@@ -366,3 +366,16 @@ entities:
       create: ["*"]
       update: [Admin]
       delete: [Admin]
+
+  # ---- Integer primary key (keyset cursor pagination) ----------------------
+  Counter:
+    fields:
+      id: int [primary]
+      label: string [required, min:1, max:100]
+      value: int [default:0]
+
+    permissions:
+      read: [Admin, Manager]
+      create: [Admin]
+      update: [Admin]
+      delete: [Admin]

@@ -232,6 +232,9 @@ export function runCertification() {
   // 7. Pagination & Sorting
   group('07-pagination-and-sorting', testPaginationAndSorting);
 
+  // 7b. Filtering (filter AST — spec/query.md)
+  group('07b-filter-ast', testFilterAst);
+
   // 8. Multitenancy
   group('08-multitenancy', testMultitenancy);
 
@@ -369,6 +372,7 @@ function testCrudAndValidation() {
   );
   check(negPriceRes, {
     'negative price returns 400': (r) => r.status === 400,
+    'validation error carries the core message': (r) => (r.body || '').includes('must be greater than or equal to'),
   });
 
   // Validation: missing required field → 400
@@ -409,6 +413,7 @@ function testCrudAndValidation() {
   );
   check(dupRes, {
     'duplicate unique returns 409 (not 500)': (r) => r.status === 409,
+    'duplicate unique carries UNIQUE_CONFLICT code': (r) => (r.body || '').includes('UNIQUE_CONFLICT'),
   });
 
   // PATCH (partial update) — only update title, ensure price unchanged.
@@ -739,6 +744,198 @@ function testPaginationAndSorting() {
   check(bigLimitRes, {
     'dangerous limit: returns 200 or 400 (never 500)': (r) => r.status === 200 || r.status === 400,
   });
+
+  // Keyset (cursor) pagination on the integer-PK Counter entity.
+  for (let i = 0; i < 3; i++) {
+    http.post(
+      `${API_URL}/api/counters`,
+      JSON.stringify({ label: `Cursor${i}`, value: i }),
+      authHeaders(adminToken)
+    );
+  }
+  const cursorPage1 = http.get(`${API_URL}/api/counters?pageSize=2&cursor=0`, bareAuth(adminToken));
+  check(cursorPage1, {
+    'cursor: keyset returns 200': (r) => r.status === 200,
+    'cursor: first page has 2 items and a nextCursor': (r) => {
+      const body = parseBody(r);
+      return listItems(r).length === 2 && body.nextCursor !== undefined && body.nextCursor !== null;
+    },
+  });
+  const cursorNext = http.get(`${API_URL}/api/counters?pageSize=2&cursor=2`, bareAuth(adminToken));
+  check(cursorNext, {
+    'cursor: resume after cursor returns 200': (r) => r.status === 200,
+  });
+
+  // Relation expansion: ?include= restricts which [many] collections are loaded.
+  const includeTags = http.get(`${API_URL}/api/products?limit=1&include=tags`, bareAuth(adminToken));
+  check(includeTags, {
+    'include: named relation accepted (200)': (r) => r.status === 200,
+    'include: tags field still present': (r) => {
+      const items = listItems(r);
+      return Array.isArray(items) && items.length > 0 && Array.isArray(items[0].tags);
+    },
+  });
+  const includeNone = http.get(`${API_URL}/api/products?limit=1&include=`, bareAuth(adminToken));
+  check(includeNone, {
+    'include: empty include accepted (200)': (r) => r.status === 200,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 7b. Filtering (filter AST — spec/query.md)
+// ---------------------------------------------------------------------------
+function testFilterAst() {
+  const adminHdr = authHeaders(adminToken);
+
+  // Unique skus per run so re-runs against a populated DB don't 409.
+  const suffix = Math.floor(Date.now() / 1000).toString(36).toUpperCase().slice(-6);
+  const filterSkuA = `FLT-A-${suffix}`;
+  const filterSkuB = `FLT-B-${suffix}`;
+
+  http.post(`${API_URL}/api/products`, JSON.stringify(productPayload({ sku: filterSkuA, title: 'Filter A Product', price: 10, stock: 5 })), adminHdr);
+  http.post(`${API_URL}/api/products`, JSON.stringify(productPayload({ sku: filterSkuB, title: 'Filter B Product', price: 20, stock: 50 })), adminHdr);
+
+  // eq on a string field — must return only the matching record.
+  const eqRes = http.get(`${API_URL}/api/products?filter=sku:eq:${filterSkuA}`, adminHdr);
+  check(eqRes, {
+    'filter: sku eq returns 200': (r) => r.status === 200,
+    'filter: sku eq returns exactly the matching product': (r) => {
+      const items = listItems(r);
+      return Array.isArray(items) && items.length === 1 && items[0].sku === filterSkuA;
+    },
+  });
+
+  // in with a list — both skus match.
+  const inRes = http.get(`${API_URL}/api/products?filter=sku:in:(${filterSkuA},${filterSkuB})`, adminHdr);
+  check(inRes, {
+    'filter: sku in returns 200': (r) => r.status === 200,
+    'filter: sku in returns both products': (r) => {
+      const items = listItems(r);
+      const skus = Array.isArray(items) ? items.map((i) => i.sku) : [];
+      return skus.includes(filterSkuA) && skus.includes(filterSkuB);
+    },
+  });
+
+  // Numeric range (gte) — never 500, and never includes a value below the bound.
+  const gteRes = http.get(`${API_URL}/api/products?filter=stock:gte:50`, adminHdr);
+  check(gteRes, {
+    'filter: stock gte 50 returns 200': (r) => r.status === 200,
+    'filter: stock gte 50 excludes stock=5': (r) => {
+      const items = listItems(r);
+      return Array.isArray(items) && items.every((i) => i.stock === undefined || i.stock >= 50);
+    },
+  });
+
+  // Unknown field → 400.
+  const badField = http.get(`${API_URL}/api/products?filter=nonexistent:eq:x`, adminHdr);
+  check(badField, {
+    'filter: unknown field returns 400': (r) => r.status === 400,
+    'filter: error carries a stable code': (r) => (r.body || '').includes('INVALID_FILTER'),
+  });
+
+  // Operator not allowed on the type → 400.
+  const badOp = http.get(`${API_URL}/api/products?filter=price:contains:abc`, adminHdr);
+  check(badOp, {
+    'filter: contains on decimal returns 400': (r) => r.status === 400,
+  });
+
+  // --- Relation path: filter products by a related entity's field ---
+  const catSuffix = Math.floor(Date.now() / 1000).toString(36);
+  const catName = `FilterCat-${catSuffix}`;
+  const catRes = http.post(
+    `${API_URL}/api/categories`,
+    JSON.stringify({ name: catName, slug: `filter-cat-${catSuffix}`, isActive: true, sortOrder: 0 }),
+    adminHdr
+  );
+  if (catRes.status === 201) {
+    const catId = parseBody(catRes).id;
+    const relSku = `FLT-REL-${suffix}`;
+    const relCreate = http.post(
+      `${API_URL}/api/products`,
+      JSON.stringify(productPayload({ sku: relSku, title: 'Relation Filter Product', price: 6, stock: 2, categoryId: catId })),
+      adminHdr
+    );
+    if (relCreate.status === 201) {
+      const relRes = http.get(`${API_URL}/api/products?filter=category.name:eq:${catName}`, adminHdr);
+      check(relRes, {
+        'filter: relation category.name eq returns 200': (r) => r.status === 200,
+        'filter: relation category.name eq matches the product': (r) => {
+          const items = listItems(r);
+          return Array.isArray(items) && items.some((i) => i.sku === relSku);
+        },
+      });
+    }
+  }
+
+  // --- JSON path: filter orders by a nested shippingAddress key (json column) ---
+  const jsonOrderNumber = `ORD-FLT-${Math.floor(Date.now() / 1000).toString(36).toUpperCase()}`;
+  const jsonOrder = http.post(
+    `${API_URL}/api/orders`,
+    JSON.stringify(orderPayload({ orderNumber: jsonOrderNumber, totalAmount: 9, subtotal: 9, tax: 0, shippingAddress: { city: 'Zurich', zip: 8000 } })),
+    authHeaders(userToken)
+  );
+  if (jsonOrder.status === 201) {
+    // text eq on a JSON path (json column — text operators are allowed).
+    const jsonEq = http.get(`${API_URL}/api/orders?filter=shippingAddress.city:eq:Zurich`, adminHdr);
+    check(jsonEq, {
+      'filter: json shippingAddress.city eq returns 200': (r) => r.status === 200,
+      'filter: json shippingAddress.city eq matches the order': (r) => {
+        const items = listItems(r);
+        return Array.isArray(items) && items.some((i) => i.orderNumber === jsonOrderNumber);
+      },
+    });
+    // ordered (numeric) operator on a `json` column → 400 (jsonb only).
+    const jsonBad = http.get(`${API_URL}/api/orders?filter=shippingAddress.zip:gte:1000`, adminHdr);
+    check(jsonBad, {
+      'filter: ordered operator on json column returns 400': (r) => r.status === 400,
+    });
+    // cleanup
+    http.del(`${API_URL}/api/orders/${parseBody(jsonOrder).id}`, null, bareAuth(adminToken));
+  }
+
+  // --- JSON path: numeric ordered filter on a jsonb column ---
+  const evNumeric = http.post(
+    `${API_URL}/api/eventlogs`,
+    JSON.stringify({
+      aggregateId: '22222222-2222-4222-8222-222222222202',
+      eventType: 'FilterNumericProbe',
+      payload: { count: 42 },
+    }),
+    HEADERS
+  );
+  if (evNumeric.status === 201) {
+    const evGte = http.get(`${API_URL}/api/eventlogs?filter=payload.count:gte:10`, adminHdr);
+    check(evGte, {
+      'filter: jsonb payload.count gte returns 200': (r) => r.status === 200,
+      'filter: jsonb payload.count gte matches the event': (r) => {
+        const items = listItems(r);
+        return Array.isArray(items) && items.some((i) => i.eventType === 'FilterNumericProbe');
+      },
+    });
+  }
+
+  // --- JSON path: ordered operator on a non-numeric jsonb leaf → clean 400 ---
+  const badJsonEmail = `jsonbad-${Math.floor(Date.now() / 1000).toString(36)}@test.com`;
+  const badJsonUser = http.post(
+    `${API_URL}/api/users`,
+    JSON.stringify({
+      email: badJsonEmail,
+      password: DEFAULT_PASSWORD,
+      firstName: 'Json',
+      lastName: 'Bad',
+      role: 'User',
+      isActive: true,
+      loginCount: 0,
+      metadata: { score: 'not-a-number' },
+    }),
+    adminHdr
+  );
+  if (badJsonUser.status === 201) {
+    const badJsonFilter = http.get(`${API_URL}/api/users?filter=metadata.score:gte:10`, adminHdr);
+    check(badJsonFilter, {
+      'filter: ordered op on non-numeric jsonb leaf returns 400 (not 500)': (r) => r.status === 400,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -899,6 +1096,36 @@ function testExtendedHardening() {
   const sortBad = http.get(`${API_URL}/api/products?sort=nonexistent_field`, adminHdr);
   check(sortBad, {
     'sort: unknown field is clamped or 4xx, never 500': (r) => r.status < 500,
+  });
+
+  // --- Multi-key sort: comma-separated keys, '-' for descending, deterministic order ---
+  const sortSuffix = Math.floor(Date.now() / 1000).toString(36).toUpperCase().slice(-6);
+  const sortPfx = `SORT-${sortSuffix}`;
+  const sortA = `${sortPfx}-A`; // price 5, title "Sort Alpha"
+  const sortB = `${sortPfx}-B`; // price 5, title "Sort Beta"
+  const sortC = `${sortPfx}-C`; // price 10, title "Sort Zulu"
+  http.post(`${API_URL}/api/products`, JSON.stringify(productPayload({ sku: sortA, title: 'Sort Alpha', price: 5, stock: 1 })), adminHdr);
+  http.post(`${API_URL}/api/products`, JSON.stringify(productPayload({ sku: sortB, title: 'Sort Beta', price: 5, stock: 1 })), adminHdr);
+  http.post(`${API_URL}/api/products`, JSON.stringify(productPayload({ sku: sortC, title: 'Sort Zulu', price: 10, stock: 1 })), adminHdr);
+
+  const probeSkus = (r) => {
+    const items = listItems(r);
+    if (!Array.isArray(items)) return [];
+    return items.map((i) => i.sku).filter((s) => typeof s === 'string' && s.startsWith(sortPfx));
+  };
+
+  const sortAsc = http.get(`${API_URL}/api/products?filter=sku:startsWith:${sortPfx}&sort=price,title`, adminHdr);
+  check(sortAsc, {
+    'sort: multi-key price,title returns 200': (r) => r.status === 200,
+    'sort: multi-key price,title orders ascending (title tiebreak)': (r) =>
+      probeSkus(r).join(',') === [sortA, sortB, sortC].join(','),
+  });
+
+  const sortDesc = http.get(`${API_URL}/api/products?filter=sku:startsWith:${sortPfx}&sort=-price,title`, adminHdr);
+  check(sortDesc, {
+    'sort: multi-key -price,title returns 200': (r) => r.status === 200,
+    'sort: multi-key -price,title orders descending (title tiebreak)': (r) =>
+      probeSkus(r).join(',') === [sortC, sortA, sortB].join(','),
   });
 
   // --- Search/filter smoke: search param never 500 ---

@@ -136,33 +136,6 @@ templates:
 	}
 }
 
-func TestRawSeedValue(t *testing.T) {
-	tests := []struct {
-		name   string
-		value  interface{}
-		dbType string
-		want   string
-	}{
-		{"integer", 42, "int", "42"},
-		{"float", 3.14, "float", "3.14"},
-		{"boolean true", true, "boolean", "true"},
-		{"boolean false", false, "boolean", "false"},
-		{"boolean string true", "true", "boolean", "true"},
-		{"boolean string false", "false", "boolean", "false"},
-		{"boolean numeric 1", "1", "boolean", "true"},
-		{"string value", "hello", "string", `"hello"`},
-		{"uuid value", "550e8400-e29b-41d4-a716-446655440000", "uuid", `"550e8400-e29b-41d4-a716-446655440000"`},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := rawSeedValue(tt.value, tt.dbType)
-			if got != tt.want {
-				t.Errorf("rawSeedValue(%v, %q) = %q, want %q", tt.value, tt.dbType, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestRenderContext_HasFeature(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -284,8 +257,9 @@ func TestResolvePackagesNilLoggerDoesNotPanic(t *testing.T) {
 	}
 }
 
-func TestRenderHasSchemaRenamesCondition(t *testing.T) {
-	render := func(project *ir.IRProject) []string {
+func TestRenderHasMigrationCondition(t *testing.T) {
+	newRenderer := func(t *testing.T, when string) *Renderer {
+		t.Helper()
 		tmpDir := t.TempDir()
 		bridgeDir := filepath.Join(tmpDir, "bridge")
 		if err := os.MkdirAll(filepath.Join(bridgeDir, "templates"), 0o755); err != nil {
@@ -294,55 +268,185 @@ func TestRenderHasSchemaRenamesCondition(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(bridgeDir, "bridge.yaml"), []byte(`name: demo
 templates:
   - for: project
-    source: templates/renames.cs.tmpl
-    target: "renames.cs"
-    when: hasSchemaRenames
+    source: templates/migration.cs.tmpl
+    target: "migration.cs"
+    when: `+when+`
 `), 0o644); err != nil {
 			t.Fatalf("write bridge: %v", err)
 		}
-		if err := os.WriteFile(filepath.Join(bridgeDir, "templates", "renames.cs.tmpl"), []byte(`renames`), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(bridgeDir, "templates", "migration.cs.tmpl"), []byte(`migration`), 0o644); err != nil {
 			t.Fatalf("write template: %v", err)
 		}
 		r, err := New(bridgeDir, nil)
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
 		}
-		written, _, err := r.Render(project, filepath.Join(tmpDir, "out"))
-		if err != nil {
-			t.Fatalf("Render() error = %v", err)
+		return r
+	}
+
+	project := &ir.IRProject{Name: "P"}
+
+	// No migration plan set -> hasMigration is false, no file written.
+	r := newRenderer(t, "hasMigration")
+	written, _, err := r.Render(project, filepath.Join(t.TempDir(), "out"))
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if len(written) != 0 {
+		t.Fatalf("no migration plan: want 0 files, got %d", len(written))
+	}
+
+	// A non-empty migration plan -> file is written.
+	r2 := newRenderer(t, "hasMigration")
+	r2.SetMigration(&ir.MigrationPlan{Operations: []ir.MigrationOp{{Kind: ir.OpCreateTable, Table: "orders"}}})
+	written, _, err = r2.Render(project, filepath.Join(t.TempDir(), "out"))
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if len(written) != 1 {
+		t.Fatalf("with migration plan: want 1 file, got %d", len(written))
+	}
+}
+
+func TestRenderHasMockDataCondition(t *testing.T) {
+	newRenderer := func(t *testing.T) *Renderer {
+		t.Helper()
+		tmpDir := t.TempDir()
+		bridgeDir := filepath.Join(tmpDir, "bridge")
+		if err := os.MkdirAll(filepath.Join(bridgeDir, "templates"), 0o755); err != nil {
+			t.Fatalf("mkdir bridge: %v", err)
 		}
-		return written
+		if err := os.WriteFile(filepath.Join(bridgeDir, "bridge.yaml"), []byte(`name: demo
+templates:
+  - for: project
+    source: templates/mock.cs.tmpl
+    target: "mock.cs"
+    when: hasMockData
+`), 0o644); err != nil {
+			t.Fatalf("write bridge: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(bridgeDir, "templates", "mock.cs.tmpl"), []byte(`mock`), 0o644); err != nil {
+			t.Fatalf("write template: %v", err)
+		}
+		r, err := New(bridgeDir, nil)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		return r
 	}
 
-	withFieldRename := &ir.IRProject{
-		Name: "P",
-		Entities: []ir.IREntity{{
-			Name: "Item", NamePlural: "Items",
-			Fields: []ir.IRField{{Name: "name", OldName: "title"}},
-		}},
+	project := &ir.IRProject{Name: "P", Entities: []ir.IREntity{{Name: "Order", NamePlural: "Orders"}}}
+
+	// No mock data -> hasMockData is false.
+	r := newRenderer(t)
+	written, _, err := r.Render(project, filepath.Join(t.TempDir(), "out"))
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
 	}
-	if got := render(withFieldRename); len(got) != 1 {
-		t.Fatalf("hasSchemaRenames (field): want 1 file (renames.cs), got %d", len(got))
+	if len(written) != 0 {
+		t.Fatalf("no mock data: want 0 files, got %d", len(written))
 	}
 
-	withEntityRename := &ir.IRProject{
-		Name: "P",
-		Entities: []ir.IREntity{{
-			Name: "Item", NamePlural: "Items", OldName: "Product",
-		}},
+	// With mock data -> file is written.
+	r2 := newRenderer(t)
+	r2.SetMockData(&ir.SeedDataset{Entities: []ir.SeedEntity{{Name: "Order", Records: []ir.SeedRecord{{}}}}})
+	written, _, err = r2.Render(project, filepath.Join(t.TempDir(), "out"))
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
 	}
-	if got := render(withEntityRename); len(got) != 1 {
-		t.Fatalf("hasSchemaRenames (entity rename): want 1 file (renames.cs), got %d", len(got))
+	if len(written) != 1 {
+		t.Fatalf("with mock data: want 1 file, got %d", len(written))
+	}
+}
+
+func TestRenderHasSeedCondition(t *testing.T) {
+	newRenderer := func(t *testing.T) *Renderer {
+		t.Helper()
+		tmpDir := t.TempDir()
+		bridgeDir := filepath.Join(tmpDir, "bridge")
+		if err := os.MkdirAll(filepath.Join(bridgeDir, "templates"), 0o755); err != nil {
+			t.Fatalf("mkdir bridge: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(bridgeDir, "bridge.yaml"), []byte(`name: demo
+templates:
+  - for: project
+    source: templates/seed.cs.tmpl
+    target: "seed.cs"
+    when: hasSeed
+`), 0o644); err != nil {
+			t.Fatalf("write bridge: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(bridgeDir, "templates", "seed.cs.tmpl"), []byte(`seed`), 0o644); err != nil {
+			t.Fatalf("write template: %v", err)
+		}
+		r, err := New(bridgeDir, nil)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		return r
 	}
 
-	withoutRename := &ir.IRProject{
-		Name: "P",
-		Entities: []ir.IREntity{{
-			Name: "Item", NamePlural: "Items",
-			Fields: []ir.IRField{{Name: "name"}},
-		}},
+	project := &ir.IRProject{Name: "P", Entities: []ir.IREntity{{Name: "Order", NamePlural: "Orders"}}}
+
+	// No seed -> hasSeed is false.
+	r := newRenderer(t)
+	written, _, err := r.Render(project, filepath.Join(t.TempDir(), "out"))
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
 	}
-	if got := render(withoutRename); len(got) != 0 {
-		t.Fatalf("no field rename: want 0 files, got %d", len(got))
+	if len(written) != 0 {
+		t.Fatalf("no seed: want 0 files, got %d", len(written))
+	}
+
+	// Normalized explicit seed -> file is written.
+	r2 := newRenderer(t)
+	r2.SetSeedData(&ir.SeedDataset{Entities: []ir.SeedEntity{{Name: "Order", Records: []ir.SeedRecord{{}}}}})
+	written, _, err = r2.Render(project, filepath.Join(t.TempDir(), "out"))
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if len(written) != 1 {
+		t.Fatalf("with seed data: want 1 file, got %d", len(written))
+	}
+}
+
+func TestRenderContext_SeedAccessor(t *testing.T) {
+	ctx := RenderContext{
+		Entity:   &ir.IREntity{Name: "Order"},
+		SeedData: &ir.SeedDataset{Entities: []ir.SeedEntity{{Name: "Order", Records: []ir.SeedRecord{{Fields: []ir.SeedValue{{Field: "id", Value: "x"}}}}}}},
+	}
+	got := ctx.Seed()
+	if len(got) != 1 || len(got[0].Fields) != 1 || got[0].Fields[0].Value != "x" {
+		t.Errorf("Seed() = %+v, want one normalized record", got)
+	}
+	if empty := (RenderContext{Entity: &ir.IREntity{Name: "Order"}}).Seed(); empty != nil {
+		t.Errorf("Seed() with no dataset should be nil, got %+v", empty)
+	}
+}
+
+func TestRenderContext_DTOAccessors(t *testing.T) {
+	e := &ir.IREntity{Name: "User", Fields: []ir.IRField{
+		{Name: "id", DatabaseType: "uuid", IsPrimary: true},
+		{Name: "name", DatabaseType: "string"},
+		{Name: "password", DatabaseType: "string"},
+		{Name: "balance", DatabaseType: "decimal", IsReadonly: true},
+		{Name: "createdAt", DatabaseType: "datetime"},
+	}}
+	ctx := RenderContext{Entity: e}
+
+	if got := ctx.ReadFields(); len(got) != 4 {
+		t.Errorf("ReadFields() = %d fields, want 4 (id, name, balance, createdAt)", len(got))
+	}
+	if got := ctx.CreateFields(); len(got) != 1 || got[0].Name != "name" {
+		t.Errorf("CreateFields() = %+v, want only [name]", got)
+	}
+	if got := ctx.UpdateFields(); len(got) != 1 || got[0].Name != "name" {
+		t.Errorf("UpdateFields() = %+v, want only [name] (no version token present)", got)
+	}
+
+	// Nil entity -> nil projections (never panics).
+	nilCtx := RenderContext{Entity: nil}
+	if nilCtx.ReadFields() != nil || nilCtx.CreateFields() != nil || nilCtx.UpdateFields() != nil {
+		t.Error("DTO accessors should return nil for a nil entity")
 	}
 }

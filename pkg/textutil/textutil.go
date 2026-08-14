@@ -79,6 +79,18 @@ func CamelCase(value string) string {
 	return strings.ToLower(value[:1]) + value[1:]
 }
 
+// FKName appends the foreign-key "Id" suffix to a relation field name unless it
+// already ends in "Id"/"id". It does NOT apply casing — callers use
+// PascalCase/CamelCase/ToDatabaseColumnName as needed (e.g. the C# bridge writes
+// `{{ fkName .Name | pascalcase }}` for the property, `ForeignKeyColumnName()`
+// for the snake_case DB column).
+func FKName(name string) string {
+	if strings.HasSuffix(name, "Id") || strings.HasSuffix(name, "id") {
+		return name
+	}
+	return name + "Id"
+}
+
 // ToDatabaseColumnName converts camelCase/PascalCase to snake_case.
 // Uses SplitIdentifier to correctly handle acronyms (e.g. "HTTPPort" -> "http_port").
 func ToDatabaseColumnName(fieldName string) string {

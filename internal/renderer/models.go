@@ -1,6 +1,8 @@
 package renderer
 
-import "github.com/DomainCraft/DomainCraft/internal/ir"
+import (
+	"github.com/DomainCraft/DomainCraft/internal/ir"
+)
 
 // BridgeConfig describes bridge.yaml.
 type BridgeConfig struct {
@@ -66,6 +68,14 @@ type RenderContext struct {
 	Entity   *ir.IREntity
 	Bridge   *BridgeConfig     // Bridge-level config available as .Bridge
 	Packages map[string]string // Resolved package versions for the current platform
+	// Migration is the abstract schema-migration plan computed by the core from
+	// the previous snapshot (nil on the first run or when nothing changed).
+	Migration *ir.MigrationPlan
+	// SeedData is the developer's explicit `seed:` rows from domain.yaml,
+	// normalized by the core into the same typed SeedRecord shape as mock data.
+	SeedData *ir.SeedDataset
+	// MockData is deterministic, generated mock seed (same shape as SeedData).
+	MockData *ir.SeedDataset
 }
 
 // Name exposes the current entity name to templates.
@@ -112,12 +122,83 @@ func (c RenderContext) Permissions() *ir.IRPermissions {
 	return c.Entity.Permissions
 }
 
-// Seed exposes the current entity seed data to templates.
-func (c RenderContext) Seed() []map[string]interface{} {
+// PermissionPlan exposes the core-computed authorization plan for one operation.
+func (c RenderContext) PermissionPlan(operation string) *ir.IRPermissionPlan {
 	if c.Entity == nil {
 		return nil
 	}
-	return c.Entity.Seed
+	return c.Entity.PermissionPlan(operation)
+}
+
+// Endpoints exposes the standard HTTP endpoint contract for the current entity.
+func (c RenderContext) Endpoints() []ir.IREndpoint {
+	if c.Entity == nil {
+		return nil
+	}
+	return c.Entity.Endpoints()
+}
+
+// AllIndexes exposes the normalized index list (declared + implicit unique).
+func (c RenderContext) AllIndexes() []ir.IRIndex {
+	if c.Entity == nil {
+		return nil
+	}
+	return c.Entity.AllIndexes()
+}
+
+// Seed exposes normalized seed rows to templates: the current entity's rows at
+// entity scope, or every entity's rows flattened at project scope.
+func (c RenderContext) Seed() []ir.SeedRecord {
+	if c.SeedData == nil {
+		return nil
+	}
+	if c.Entity != nil {
+		for i := range c.SeedData.Entities {
+			if c.SeedData.Entities[i].Name == c.Entity.Name {
+				return c.SeedData.Entities[i].Records
+			}
+		}
+		return nil
+	}
+	var out []ir.SeedRecord
+	for i := range c.SeedData.Entities {
+		out = append(out, c.SeedData.Entities[i].Records...)
+	}
+	return out
+}
+
+// HasSeedData reports whether the context carries normalized explicit seed for
+// this entity (or, project-level, whether any entity has seed). When no
+// normalized dataset was attached it falls back to the entity's raw seed rows
+// so bridges relying on `when: hasSeed` still work.
+func (c RenderContext) HasSeedData() bool {
+	if c.SeedData != nil {
+		if c.Entity == nil {
+			for i := range c.SeedData.Entities {
+				if len(c.SeedData.Entities[i].Records) > 0 {
+					return true
+				}
+			}
+			return false
+		}
+		for i := range c.SeedData.Entities {
+			if c.SeedData.Entities[i].Name == c.Entity.Name && len(c.SeedData.Entities[i].Records) > 0 {
+				return true
+			}
+		}
+		return false
+	}
+	if c.Entity != nil {
+		return len(c.Entity.Seed) > 0
+	}
+	if c.Project != nil {
+		for _, e := range c.Project.Entities {
+			if len(e.Seed) > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // HasFeature reports whether the current entity has the named feature enabled.
@@ -141,17 +222,110 @@ func (c RenderContext) HasCacheable() bool {
 	return c.Entity != nil && c.Entity.HasCacheable()
 }
 
+// ReadFields exposes the current entity's read-DTO projection to templates.
+func (c RenderContext) ReadFields() []ir.IRField {
+	if c.Entity == nil {
+		return nil
+	}
+	return c.Entity.ReadFields()
+}
+
+// CreateFields exposes the current entity's create-DTO projection to templates.
+func (c RenderContext) CreateFields() []ir.IRField {
+	if c.Entity == nil {
+		return nil
+	}
+	return c.Entity.CreateFields()
+}
+
+// UpdateFields exposes the current entity's update-DTO projection to templates.
+func (c RenderContext) UpdateFields() []ir.IRField {
+	if c.Entity == nil {
+		return nil
+	}
+	return c.Entity.UpdateFields()
+}
+
+// SearchableFields exposes the scalar text fields eligible for free-text search.
+func (c RenderContext) SearchableFields() []ir.IRField {
+	if c.Entity == nil {
+		return nil
+	}
+	return c.Entity.SearchableFields()
+}
+
+// SortableFields exposes the scalar fields a list endpoint may order by.
+func (c RenderContext) SortableFields() []ir.IRField {
+	if c.Entity == nil {
+		return nil
+	}
+	return c.Entity.SortableFields()
+}
+
+// FilterableFields exposes the scalar fields that may be filtered by value,
+// each carrying its supported operators via IRField.FilterOperators().
+func (c RenderContext) FilterableFields() []ir.IRField {
+	if c.Entity == nil {
+		return nil
+	}
+	return c.Entity.FilterableFields()
+}
+
+// FilterablePaths exposes the complete filter path schema: scalar fields,
+// one-hop relation paths and JSON roots, each with its allowed operators.
+func (c RenderContext) FilterablePaths() []ir.FilterPathSpec {
+	if c.Entity == nil {
+		return nil
+	}
+	return c.Entity.FilterablePaths()
+}
+
+// QuerySchema exposes the entity's whole list-query surface (search + sort +
+// filter) in one object — the single entry point for a bridge's runtime query
+// validator.
+func (c RenderContext) QuerySchema() ir.QuerySchema {
+	if c.Entity == nil {
+		return ir.QuerySchema{}
+	}
+	return c.Entity.QuerySchema()
+}
+
+// HasMigration reports whether the context carries a non-empty migration plan.
+func (c RenderContext) HasMigration() bool {
+	return c.Migration != nil && !c.Migration.IsEmpty()
+}
+
+// HasMockData reports whether the context carries mock data for this entity.
+func (c RenderContext) HasMockData() bool {
+	if c.MockData == nil {
+		return false
+	}
+	if c.Entity == nil {
+		return len(c.MockData.Entities) > 0
+	}
+	for _, em := range c.MockData.Entities {
+		if em.Name == c.Entity.Name && len(em.Records) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// CursorField returns the keyset-pagination cursor field (the PK when it is a
+// monotonic integer), or nil when keyset is unsupported for this entity.
+func (c RenderContext) CursorField() *ir.IRField {
+	if c.Entity == nil {
+		return nil
+	}
+	return c.Entity.CursorField()
+}
+
 // PrimaryKey returns the primary key field of the current entity, or nil if not found.
 func (c RenderContext) PrimaryKey() *ir.IRField {
 	if c.Entity == nil {
 		return nil
 	}
-	for i := range c.Entity.Fields {
-		if c.Entity.Fields[i].IsPrimary {
-			return &c.Entity.Fields[i]
-		}
-	}
-	return nil
+	return c.Entity.PrimaryKey()
 }
 
 // RenderedFile describes a single file produced by the renderer.
