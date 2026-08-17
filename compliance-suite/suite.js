@@ -39,8 +39,12 @@ export const options = {
     // The suite deliberately fires expected-error requests (400/401/404/409),
     // so gate on the assertion results, not the raw HTTP failure rate.
     checks: ['rate>0.99'],
-    // Latency budget: p95 under 500ms.
-    http_req_duration: ['p(95)<500'],
+    // Latency budget (p95 under 500ms) is scoped to successful 2xx/3xx responses.
+    // Login failures (401) and the rate-limit burst (429) are deliberately slow by
+    // design — login runs a full bcrypt hash on unknown emails (anti-enumeration)
+    // and the burst hammers bcrypt concurrently — so a global p(95) is inflated by
+    // them and no longer measures "is the API responsive".
+    'http_req_duration{expected_response:true}': ['p(95)<500'],
   },
 };
 
