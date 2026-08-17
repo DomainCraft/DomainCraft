@@ -58,6 +58,106 @@ templates:
 	}
 }
 
+func TestComposeAttachBases(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	write := func(dir, name, content string) {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s/%s: %v", dir, name, err)
+		}
+	}
+
+	// Base bridge: provides a helper (named template) + a type mapping + a template.
+	baseDir := filepath.Join(tmpDir, "base")
+	write(baseDir, "bridge.yaml", `name: base
+helpers: helpers.tmpl
+templates:
+  - for: project
+    source: templates/base.tmpl
+    target: "base.txt"
+`)
+	write(baseDir, "helpers.tmpl", `{{ define "shout" }}{{ upper . }}{{ end }}`)
+	write(filepath.Join(baseDir, "templates"), "base.tmpl", `base-{{ .Project.Name }}`)
+	write(baseDir, "type_mappings.yaml", "types:\n  string: str\n")
+
+	// Adapter bridge: extends the base, uses the base's helper and type mapping.
+	adapterDir := filepath.Join(tmpDir, "adapter")
+	write(adapterDir, "bridge.yaml", `name: adapter
+templates:
+  - for: project
+    source: templates/adapter.tmpl
+    target: "adapter.txt"
+`)
+	write(filepath.Join(adapterDir, "templates"), "adapter.tmpl", `{{ template "shout" "hi" }}/{{ languageType "string" false }}`)
+
+	r, err := New(adapterDir, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := r.AttachBases([]string{baseDir}); err != nil {
+		t.Fatalf("AttachBases() error = %v", err)
+	}
+
+	project := &ir.IRProject{Name: "TestProject"}
+	written, _, err := r.Render(project, filepath.Join(tmpDir, "out"))
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if len(written) != 2 {
+		t.Fatalf("got %d files, want 2 (base + adapter)", len(written))
+	}
+
+	baseOut, err := os.ReadFile(filepath.Join(tmpDir, "out", "base.txt"))
+	if err != nil {
+		t.Fatalf("read base.txt: %v", err)
+	}
+	if got, want := string(baseOut), "base-TestProject"; got != want {
+		t.Errorf("base.txt = %q, want %q", got, want)
+	}
+
+	adapterOut, err := os.ReadFile(filepath.Join(tmpDir, "out", "adapter.txt"))
+	if err != nil {
+		t.Fatalf("read adapter.txt: %v", err)
+	}
+	if got, want := string(adapterOut), "HI/str"; got != want {
+		t.Errorf("adapter.txt = %q, want %q (base helper + base type mapping must be visible to the adapter)", got, want)
+	}
+}
+
+func TestMergeTypeMappingsOverlay(t *testing.T) {
+	base := &typeMappings{
+		Types:       map[string]string{"string": "str", "int": "num"},
+		ArrayFormat: "%s[]",
+		ValueTypes:  []string{"str", "num"},
+	}
+	overlay := &typeMappings{
+		Types:          map[string]string{"string": "text"},
+		NullableFormat: "?",
+	}
+
+	got := mergeTypeMappings(base, overlay)
+
+	if got.Types["string"] != "text" {
+		t.Errorf("Types[string] = %q, want %q (overlay wins)", got.Types["string"], "text")
+	}
+	if got.Types["int"] != "num" {
+		t.Errorf("Types[int] = %q, want %q (base preserved)", got.Types["int"], "num")
+	}
+	if got.ArrayFormat != "%s[]" {
+		t.Errorf("ArrayFormat = %q, want %q (base scalar preserved)", got.ArrayFormat, "%s[]")
+	}
+	if got.NullableFormat != "?" {
+		t.Errorf("NullableFormat = %q, want %q (overlay scalar)", got.NullableFormat, "?")
+	}
+	if len(got.ValueTypes) != 2 || got.ValueTypes[0] != "str" || got.ValueTypes[1] != "num" {
+		t.Errorf("ValueTypes = %v, want [str num] (base preserved)", got.ValueTypes)
+	}
+}
+
 func TestRenderOverwriteFalseScaffoldsOnce(t *testing.T) {
 	tmpDir := t.TempDir()
 	bridgeDir := filepath.Join(tmpDir, "bridge")
@@ -247,10 +347,10 @@ func TestResolvePackagesNilLoggerDoesNotPanic(t *testing.T) {
 	}))
 	defer server.Close()
 
-	r := &Renderer{log: nil, config: BridgeConfig{
+	r := &Renderer{log: nil, sources: []sourceConfig{{config: BridgeConfig{
 		RegistryURL:      server.URL + "/{id}/index.json",
 		RegistryPackages: map[string]string{"jwt_bearer": "Microsoft.AspNetCore.Authentication.JwtBearer"},
-	}}
+	}}}}
 	got := r.resolvePackages()
 	if len(got) != 0 {
 		t.Fatalf("resolvePackages() = %v, want no resolved versions on failure", got)

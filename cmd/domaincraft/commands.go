@@ -148,6 +148,17 @@ func newGenerateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Bridge composition: an adapter bridge may declare `extends: <base>`
+			// (a path, registry ID or owner/repo). Resolve the whole base chain and
+			// attach it so the adapter renders on top of the shared base bridge
+			// (e.g. react-rest extends ts-core).
+			basePaths, err := resolveBaseChain(bridgePath, rendererInstance.Extends(), log)
+			if err != nil {
+				return err
+			}
+			if err := rendererInstance.AttachBases(basePaths); err != nil {
+				return err
+			}
 			rendererInstance.SetMigration(migrationPlan)
 			rendererInstance.SetSeedData(seedData)
 			rendererInstance.SetMockData(mockDataset)
@@ -348,6 +359,65 @@ func resolveBridgeInteractive(log *logger.Logger) (string, string, error) {
 	}
 
 	return resolved, entry.Name, nil
+}
+
+// resolveBaseChain resolves an adapter bridge's `extends` chain to local bridge
+// paths, ordered outermost base first (so the deepest base renders first). Each
+// base is resolved the same way --bridge is: a path, registry ID or owner/repo.
+func resolveBaseChain(adapterDir, baseRef string, log *logger.Logger) ([]string, error) {
+	resolver := bridge.NewResolver(bridge.Default()).WithEnsureOptions(bridgeEnsureOptions(log))
+
+	var chain []string
+	visited := make(map[string]bool)
+	fromDir := adapterDir
+	cur := baseRef
+	for cur != "" {
+		path, err := resolveExtendsRef(cur, fromDir, resolver)
+		if err != nil {
+			return nil, fmt.Errorf("resolve bridge `extends: %s`: %w", cur, err)
+		}
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+		if visited[path] {
+			return nil, fmt.Errorf("bridge `extends` cycle detected at %q", cur)
+		}
+		visited[path] = true
+		chain = append(chain, path)
+
+		baseRenderer, err := renderer.New(path, log)
+		if err != nil {
+			return nil, fmt.Errorf("load base bridge %s: %w", path, err)
+		}
+		cur = baseRenderer.Extends()
+		fromDir = path
+	}
+
+	// Reverse so the outermost base comes first (it renders first).
+	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+		chain[i], chain[j] = chain[j], chain[i]
+	}
+	return chain, nil
+}
+
+// resolveExtendsRef resolves one `extends` reference. For a registry ID it first
+// checks a local checkout next to the extending bridge (monorepo sibling) or
+// inside its directory (a CI checkout), so development works before the base
+// bridge is published; otherwise it falls through to the normal path/ID/
+// owner-repo resolution (cache + clone).
+func resolveExtendsRef(ref, fromDir string, resolver *bridge.Resolver) (string, error) {
+	if entry := bridge.Default().ByID(ref); entry != nil {
+		repo := filepath.Base(entry.GitHub)
+		for _, candidate := range []string{
+			filepath.Join(filepath.Dir(fromDir), repo), // sibling of the adapter (monorepo)
+			filepath.Join(fromDir, repo),               // inside the adapter's directory (CI checkout)
+		} {
+			if info, err := os.Stat(filepath.Join(candidate, "bridge.yaml")); err == nil && !info.IsDir() {
+				return candidate, nil
+			}
+		}
+	}
+	return resolver.Resolve(ref)
 }
 
 // bridgeEnsureOptions builds the bridge caching/update policy from the CLI

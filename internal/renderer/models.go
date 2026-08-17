@@ -9,6 +9,7 @@ type BridgeConfig struct {
 	Name             string            `yaml:"name"`
 	Description      string            `yaml:"description"`
 	OutputDir        string            `yaml:"output_dir"`
+	Extends          string            `yaml:"extends"`           // Optional base bridge (path / registry ID / owner-repo) this bridge composes on top of
 	Helpers          string            `yaml:"helpers"`           // Optional shared template file with named templates
 	RegistryURL      string            `yaml:"registry_url"`      // URL template for package registry ({id} = lowercase package ID)
 	RegistryPackages map[string]string `yaml:"registry_packages"` // logical key -> registry package ID (used with registry_url)
@@ -244,6 +245,16 @@ func (c RenderContext) UpdateFields() []ir.IRField {
 		return nil
 	}
 	return c.Entity.UpdateFields()
+}
+
+// PatchFields exposes the current entity's patch-DTO projection to templates:
+// the core's patchable surface (scalars + single foreign keys) plus the
+// optimistic-lock concurrency token.
+func (c RenderContext) PatchFields() []ir.IRField {
+	if c.Entity == nil {
+		return nil
+	}
+	return c.Entity.PatchFields()
 }
 
 // SearchableFields exposes the scalar text fields eligible for free-text search.

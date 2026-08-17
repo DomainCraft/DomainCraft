@@ -111,6 +111,43 @@ func TestIREntity_UpdateFieldsIncludesVersion(t *testing.T) {
 	}
 }
 
+func TestIREntity_PatchFields(t *testing.T) {
+	e := entityWithFields(
+		IRField{Name: "id", IsPrimary: true},
+		IRField{Name: "title", DatabaseType: "string"},                    // scalar -> patchable
+		IRField{Name: "categoryId", DatabaseType: "uuid", IsRelation: true}, // single FK -> patchable
+		IRField{Name: "tags", DatabaseType: "array(string)"},              // array -> excluded
+		IRField{Name: "status", DatabaseType: "OrderStatus"},              // enum -> excluded
+		IRField{Name: "meta", DatabaseType: "jsonb"},                      // json -> excluded
+		IRField{Name: "password", DatabaseType: "string"},                 // sensitive -> excluded
+		IRField{Name: "balance", IsReadonly: true},                        // readonly -> excluded
+		IRField{Name: "createdAt", DatabaseType: "datetime"},              // feature -> excluded
+		IRField{Name: "version", DatabaseType: "int"},                     // concurrency token -> kept
+	)
+	got := e.PatchFields()
+	want := []string{"title", "categoryId", "version"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d patch fields, want %d (%v): %+v", len(got), len(want), want, names(got))
+	}
+	for i, name := range want {
+		if got[i].Name != name {
+			t.Errorf("patch field[%d] = %q, want %q", i, got[i].Name, name)
+		}
+	}
+}
+
+func TestIREntity_PatchFieldsNoVersionWithoutLock(t *testing.T) {
+	e := entityWithFields(
+		IRField{Name: "id", IsPrimary: true},
+		IRField{Name: "title", DatabaseType: "string"},
+		IRField{Name: "createdAt", DatabaseType: "datetime"}, // no version field declared
+	)
+	got := e.PatchFields()
+	if len(got) != 1 || got[0].Name != "title" {
+		t.Fatalf("got %v, want just [title] (no version when lock absent)", names(got))
+	}
+}
+
 func names(fields []IRField) []string {
 	out := make([]string, len(fields))
 	for i, f := range fields {

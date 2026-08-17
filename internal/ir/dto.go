@@ -82,3 +82,19 @@ func (e IREntity) UpdateFields() []IRField {
 	}
 	return out
 }
+
+// PatchFields returns the fields accepted in a merge-patch (PATCH) request body:
+// the core's patchable surface (scalar non-server-managed fields plus single
+// foreign keys — see IsPatchable) plus the optimistic-lock concurrency token,
+// which the client echoes on patch for safe concurrency. Arrays, enums, JSON
+// blobs and collections are intentionally absent, mirroring the server's
+// ApplyPatch eligibility.
+func (e IREntity) PatchFields() []IRField {
+	out := make([]IRField, 0, len(e.Fields))
+	for _, f := range e.Fields {
+		if f.IsPatchable() || f.IsConcurrencyToken() {
+			out = append(out, f)
+		}
+	}
+	return out
+}

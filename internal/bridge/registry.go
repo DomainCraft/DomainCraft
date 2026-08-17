@@ -33,6 +33,20 @@ var DefaultRegistry = []RegistryEntry{
 		Language:    "JSON",
 		GitHub:      "DomainCraft/domaincraft-bridge-appwrite",
 	},
+	{
+		ID:          "ts-core",
+		Name:        "TypeScript core client",
+		Description: "Framework-agnostic TypeScript data layer generated from the IR (typed query DSL, Zod validation, JWT client, permissions) — composed under framework adapters via `extends`",
+		Language:    "TypeScript",
+		GitHub:      "DomainCraft/domaincraft-bridge-ts",
+	},
+	{
+		ID:          "react-rest",
+		Name:        "React + TypeScript client",
+		Description: "React data layer generated from the IR (typed query DSL, Zod validation, TanStack Query hooks, JWT auth)",
+		Language:    "TypeScript",
+		GitHub:      "DomainCraft/domaincraft-bridge-react",
+	},
 }
 
 // Registry provides lookup methods over a set of bridge entries.
@@ -64,5 +78,3 @@ func (r *Registry) ByID(id string) *RegistryEntry {
 	}
 	return nil
 }
-
-
