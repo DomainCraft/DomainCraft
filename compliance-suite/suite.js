@@ -467,17 +467,98 @@ function testSecurityAndOwnership() {
     '@Owner read isolation: UserB gets 403 or 404': (r) => r.status === 403 || r.status === 404,
   });
 
+  // @Owner update isolation: UserB cannot PUT UserA's order. The per-record owner
+  // check runs on the fetched entity before any write, so the request is rejected
+  // (403/404) and the stored row is never touched.
+  const updForbidden = http.put(
+    `${API_URL}/api/orders/${orderId}`,
+    JSON.stringify(orderPayload({ orderNumber, totalAmount: 999.99, subtotal: 999.99, tax: 0 })),
+    authHeaders(secondUserToken)
+  );
+  check(updForbidden, {
+    '@Owner update isolation: UserB gets 403 or 404': (r) => r.status === 403 || r.status === 404,
+  });
+
+  // @Owner patch isolation: same guarantee for the merge-patch endpoint.
+  const patchForbidden = http.patch(
+    `${API_URL}/api/orders/${orderId}`,
+    JSON.stringify({ totalAmount: 999.99 }),
+    authHeaders(secondUserToken)
+  );
+  check(patchForbidden, {
+    '@Owner patch isolation: UserB gets 403 or 404': (r) => r.status === 403 || r.status === 404,
+  });
+
   // @Owner isolation: UserB cannot delete UserA's order.
   const delForbidden = http.del(`${API_URL}/api/orders/${orderId}`, null, bareAuth(secondUserToken));
   check(delForbidden, {
     '@Owner delete isolation: UserB gets 403 or 404': (r) => r.status === 403 || r.status === 404,
   });
 
-  // Admin CAN read and delete UserA's order.
+  // Admin CAN read UserA's order, and the rejected writes/deletes must have left it
+  // untouched — the original totalAmount (100) proves the owner check blocked the
+  // mutation rather than applying it and merely masking the response.
   const adminReadRes = http.get(`${API_URL}/api/orders/${orderId}`, bareAuth(adminToken));
   check(adminReadRes, {
     'admin can read @Owner order': (r) => r.status === 200,
+    '@Owner isolation: rejected update/delete left the order unchanged': (r) =>
+      r.status === 200 && parseFloat(parseBody(r).totalAmount) === 100,
   });
+
+  // @Owner LIST read: the ownership filter must be pushed into SQL (a WHERE clause),
+  // NOT applied to a fetched page in memory. UserA owns one prefixed order, UserB owns
+  // three; a SQL owner predicate yields totalCount=1 and a full page of UserA's row,
+  // while an in-memory post-pagination filter would report the global count (4) and
+  // under-fill (or mis-populate) the page.
+  const ownerPrefix = 'OWN-' + Math.floor(Date.now() / 1000).toString(36).toUpperCase();
+  const ownerOrderIds = [];
+  const userAOrderNumber = `${ownerPrefix}-A`;
+  const createUserARes = http.post(
+    `${API_URL}/api/orders`,
+    JSON.stringify(orderPayload({ orderNumber: userAOrderNumber })),
+    authHeaders(userToken)
+  );
+  check(createUserARes, {
+    '@Owner list: UserA creates owned order': (r) => r.status === 201,
+  });
+  if (createUserARes.status === 201) ownerOrderIds.push(parseBody(createUserARes).id);
+  for (let i = 0; i < 3; i++) {
+    const createUserBRes = http.post(
+      `${API_URL}/api/orders`,
+      JSON.stringify(orderPayload({ orderNumber: `${ownerPrefix}-B${i}` })),
+      authHeaders(secondUserToken)
+    );
+    if (createUserBRes.status === 201) ownerOrderIds.push(parseBody(createUserBRes).id);
+  }
+
+  const ownerListRes = http.get(
+    `${API_URL}/api/orders?page=1&limit=1&filter=orderNumber:startsWith:${ownerPrefix}`,
+    bareAuth(userToken)
+  );
+  check(ownerListRes, {
+    '@Owner list: returns 200': (r) => r.status === 200,
+    '@Owner list: totalCount is the owned-row count, not the global count (SQL WHERE)': (r) =>
+      parseBody(r).totalCount === 1,
+    '@Owner list: page is fully populated with only the owned row': (r) => {
+      const items = listItems(r);
+      return Array.isArray(items) && items.length === 1 && items[0].orderNumber === userAOrderNumber;
+    },
+  });
+
+  // Reverse: the other owner sees exactly their three prefixed rows (totalCount=3),
+  // confirming the predicate scopes rows per-caller instead of being a global filter.
+  const ownerListResB = http.get(
+    `${API_URL}/api/orders?page=1&limit=3&filter=orderNumber:startsWith:${ownerPrefix}`,
+    bareAuth(secondUserToken)
+  );
+  check(ownerListResB, {
+    '@Owner list: other owner sees exactly their own rows': (r) => parseBody(r).totalCount === 3,
+  });
+
+  // Cleanup: admin removes the prefixed orders (soft delete).
+  for (const id of ownerOrderIds) {
+    http.del(`${API_URL}/api/orders/${id}`, null, bareAuth(adminToken));
+  }
 
   // Permission-based RBAC: Viewer role cannot delete entities restricted to Admin.
   const viewerDelRes = http.del(`${API_URL}/api/tags/00000000-0000-0000-0000-000000000000`, null, bareAuth(viewerToken));
@@ -1424,19 +1505,31 @@ function testSecurityHardening() {
   // The generated bridge fixes a 400/60s global permit window. The suite is
   // still GREEN with just one iteration, so to actually trigger a 429 we must
   // push cumulative requests past the 400 budget within a single 60s window.
+  // The burst is fired in concurrent batches: a sequential loop is too slow to
+  // trip a fixed window now that login always runs a full bcrypt hash on unknown
+  // emails (anti-enumeration) — ~250ms/req × 420 would exceed the 60s window and
+  // the counter would reset before reaching 400.
   // This MUST run last (group order) so the exhausted budget can't poison 09.
   let saw429 = false;
   let sawRetryAfter = false;
-  for (let i = 0; i < 420; i++) {
-    const burst = http.post(
-      `${API_URL}/api/user/login`,
-      JSON.stringify({ email: 'ratelimit@test.com', password: 'wrong' }),
-      HEADERS
-    );
-    if (burst.status === 429) {
-      saw429 = true;
-      sawRetryAfter = burst.headers['Retry-After'] !== undefined && burst.headers['Retry-After'] !== null;
-      break;
+  const BURST_TOTAL = 420;
+  const BURST_CHUNK = 50;
+  for (let sent = 0; sent < BURST_TOTAL && !saw429; sent += BURST_CHUNK) {
+    const batch = [];
+    for (let i = 0; i < BURST_CHUNK && sent + i < BURST_TOTAL; i++) {
+      batch.push({
+        method: 'POST',
+        url: `${API_URL}/api/user/login`,
+        body: JSON.stringify({ email: 'ratelimit@test.com', password: 'wrong' }),
+        params: HEADERS,
+      });
+    }
+    for (const burst of http.batch(batch)) {
+      if (burst.status === 429) {
+        saw429 = true;
+        sawRetryAfter = burst.headers['Retry-After'] !== undefined && burst.headers['Retry-After'] !== null;
+        break;
+      }
     }
   }
   check(saw429, {
