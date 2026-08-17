@@ -214,6 +214,7 @@ entities:
       notes: string [optional, max:1000]
       shippingAddress: json [optional]
       items: relation(OrderItem) [many]
+      payments: relation(Payment) [many]
       trackingNumbers: array(string) [optional]
       estimatedDeliveryDates: array(datetime) [optional]
       paidAt: datetime [optional]

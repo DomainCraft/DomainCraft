@@ -126,7 +126,7 @@ function productPayload(overrides = {}) {
     title: 'Test Product for CRUD',
     price: 9.99,
     stock: 100,
-    status: 'DRAFT',
+    status: 'draft',
     supplierId: null,
     ...overrides,
   };
@@ -138,7 +138,7 @@ function orderPayload(overrides = {}) {
     totalAmount: 100.0,
     subtotal: 80.0,
     tax: 20.0,
-    status: 'PENDING',
+    status: 'pending',
     ...overrides,
   };
 }
@@ -156,7 +156,7 @@ function documentPayload(overrides = {}) {
   return {
     title: 'Test Document',
     content: 'content here',
-    status: 'Draft',
+    status: 'draft',
     isPublished: false,
     fileSize: 0,
     ...overrides,
@@ -200,11 +200,11 @@ export function runCertification() {
     adminToken = login('admin@test.com');
     check(adminToken, { 'admin token acquired': (t) => t !== null });
 
-    createUser('manager@test.com', 'Manager');
-    createUser('editor@test.com', 'Editor');
-    createUser('user@test.com', 'User');
-    createUser('viewer@test.com', 'Viewer');
-    createUser('seconduser@test.com', 'User');
+    createUser('manager@test.com', 'manager');
+    createUser('editor@test.com', 'editor');
+    createUser('user@test.com', 'user');
+    createUser('viewer@test.com', 'viewer');
+    createUser('seconduser@test.com', 'user');
 
     managerToken = login('manager@test.com');
     editorToken = login('editor@test.com');
@@ -1008,7 +1008,7 @@ function testFilterAst() {
       password: DEFAULT_PASSWORD,
       firstName: 'Json',
       lastName: 'Bad',
-      role: 'User',
+      role: 'user',
       isActive: true,
       loginCount: 0,
       metadata: { score: 'not-a-number' },
@@ -1045,7 +1045,7 @@ function testMultitenancy() {
       password: DEFAULT_PASSWORD,
       firstName: 'Tenant',
       lastName: 'User',
-      role: 'User',
+      role: 'user',
       isActive: true,
       loginCount: 0,
       tenantId,
@@ -1247,7 +1247,7 @@ function testExtendedHardening() {
       description: 'updated via PUT',
       price: 7,
       stock: 2,
-      status: 'DRAFT',
+      status: 'draft',
       viewCount: 0,
     });
     const put1 = http.put(`${API_URL}/api/products/${putTarget.id}`, putBody, adminHdr);
@@ -1299,7 +1299,7 @@ function testArraysAndEnumArrays() {
   // --- Product array-of-string, array-of-uuid, array-of-enum on create + read ---
   const imgArr = ['https://cdn.test/img1.png', 'https://cdn.test/img2.png'];
   const relIds = ['11111111-1111-4111-8111-111111111101', '22222222-2222-4222-8222-222222222202'];
-  const payMethods = ['CreditCard', 'PayPal'];
+  const payMethods = ['credit_card', 'pay_pal'];
   const arrCreate = http.post(
     `${API_URL}/api/products`,
     JSON.stringify(productPayload({
@@ -1347,7 +1347,7 @@ function testArraysAndEnumArrays() {
     JSON.stringify(productPayload({
       sku: 'PRD-ARRBAD',
       title: 'Bad Enum Array Product',
-      supportedPaymentMethods: ['CreditCard', 'DoesNotExist'],
+      supportedPaymentMethods: ['credit_card', 'DoesNotExist'],
       viewCount: 0,
     })),
     adminHdr
@@ -1365,7 +1365,7 @@ function testArraysAndEnumArrays() {
       password: DEFAULT_PASSWORD,
       firstName: 'Array',
       lastName: 'User',
-      role: 'User',
+      role: 'user',
       isActive: true,
       loginCount: 0,
       phoneNumbers: ['+7-900-000-00-01', '+7-900-000-00-02'],
@@ -1769,7 +1769,7 @@ function testDataContract() {
       password: DEFAULT_PASSWORD,
       firstName: 'Bad',
       lastName: 'Email',
-      role: 'User',
+      role: 'user',
       isActive: true,
       loginCount: 0,
     }),
@@ -1802,7 +1802,7 @@ function testDataContract() {
       password: DEFAULT_PASSWORD,
       firstName: 'Json',
       lastName: 'Meta',
-      role: 'User',
+      role: 'user',
       isActive: true,
       loginCount: 0,
       metadata: metaPayload,
