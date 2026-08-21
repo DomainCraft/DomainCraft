@@ -11,10 +11,10 @@ import (
 	"github.com/DomainCraft/DomainCraft/internal/ir"
 	"github.com/DomainCraft/DomainCraft/internal/packages"
 	"github.com/DomainCraft/DomainCraft/internal/specmeta"
+	"github.com/DomainCraft/DomainCraft/internal/templatefuncs"
 	"github.com/DomainCraft/DomainCraft/pkg/logger"
 	"github.com/DomainCraft/DomainCraft/pkg/textutil"
 
-	"github.com/Masterminds/sprig/v3"
 	"gopkg.in/yaml.v3"
 )
 
@@ -182,25 +182,9 @@ func (r *Renderer) applyDelimiters(t *template.Template) *template.Template {
 }
 
 func (r *Renderer) buildFuncMap() (template.FuncMap, error) {
-	funcMap := template.FuncMap{}
-	for key, value := range sprig.FuncMap() {
-		funcMap[key] = value
-	}
-	// Generic language-agnostic functions
-	funcMap["pluralize"] = textutil.Pluralize
-	// pascalcase/camelcase accept any value and coerce it to a string first, so
-	// bridges can pipe the IR's named string types (e.g. FilterOp) without
-	// tripping over Go's nominal typing — the underlying value is already the
-	// wire name the bridge needs.
-	funcMap["pascalcase"] = func(v any) string { return textutil.PascalCase(stringArg(v)) }
-	funcMap["camelcase"] = func(v any) string { return textutil.CamelCase(stringArg(v)) }
-	funcMap["lowercase"] = strings.ToLower
-	funcMap["uppercase"] = strings.ToUpper
-	funcMap["humanize"] = func(name string) string {
-		return strings.Join(textutil.SplitIdentifier(name), " ")
-	}
+	funcMap := templatefuncs.FuncMap()
+	// Renderer/IR-specific functions that need renderer context or IR types.
 	funcMap["jsonValue"] = jsonValue
-	funcMap["fkName"] = textutil.FKName
 	// seedKind maps an IR database type to its language-agnostic value kind
 	// (uuid/text/int/.../enum/array), used by bridges that serialize seed values.
 	funcMap["seedKind"] = ir.KindOf
@@ -802,21 +786,6 @@ func renderTemplateString(pattern string, data any, funcMap template.FuncMap) (s
 		return "", err
 	}
 	return builder.String(), nil
-}
-
-// stringArg coerces a template argument to its string form. It backs the
-// lenient case-transform functions (pascalcase/camelcase): plain strings pass
-// through, fmt.Stringer values use String(), and anything else (including the
-// IR's named string types such as FilterOp) is formatted with fmt.Sprint.
-func stringArg(v any) string {
-	switch t := v.(type) {
-	case string:
-		return t
-	case fmt.Stringer:
-		return t.String()
-	default:
-		return fmt.Sprint(v)
-	}
 }
 
 func jsonValue(value any) string {
