@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"runtime/debug"
 	"strings"
 
 	"github.com/DomainCraft/DomainCraft/internal/bridge"
@@ -35,9 +37,40 @@ var (
 	updateBridges  bool   // --update-bridges: download newer bridge versions before generating
 	checkUpdates   bool   // bridges --check-updates: contact remotes and report outdated cached bridges
 
-	// version is stamped at build time via -ldflags "-X main.version=vX.Y.Z".
+	// version is stamped at build time via -ldflags "-X main.version=vX.Y.Z" and,
+	// when it isn't, backed by the module version in build info (see init).
 	version = "dev"
 )
+
+// pseudoVersionRe matches Go pseudo-versions (vX.Y.Z-0.yyyymmddhhmmss-hash).
+// They appear only in untagged builds — plain `go build` of a checkout — and
+// are noise in --version output and confusing for `update`, so they count as
+// "dev", not as a released version.
+var pseudoVersionRe = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.[0-9]{14}-[0-9a-f]{12,}(\+[0-9A-Za-z.-]+)?$`)
+
+// resolveVersion picks the version the CLI reports: the value stamped at build
+// time wins; otherwise the module version in build info (binaries installed
+// with `go install module@vX.Y.Z` embed the clean tag, e.g. v0.5.0); otherwise
+// "dev" for a local build.
+func resolveVersion(stamped, buildInfo string) string {
+	if stamped != "" && stamped != "dev" {
+		return stamped
+	}
+	if buildInfo != "" && buildInfo != "(devel)" && !pseudoVersionRe.MatchString(buildInfo) {
+		return buildInfo
+	}
+	return "dev"
+}
+
+// init backs version with build info when it wasn't stamped. The documented
+// install path `go install github.com/DomainCraft/DomainCraft/cmd/domaincraft@latest`
+// passes no ldflags, so without this fallback an installed binary would report
+// "dev" forever (and `domaincraft update` would refuse to self-update).
+func init() {
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		version = resolveVersion(version, bi.Main.Version)
+	}
+}
 
 func Execute() {
 	if err := newRootCommand().Execute(); err != nil {
