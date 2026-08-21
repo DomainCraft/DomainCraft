@@ -222,8 +222,8 @@ func (r IRRelation) EagerLoadNavigation() string {
 
 // TableName returns the entity's snake_case database table name. It is the
 // single source of truth for the table name — bridges must print this instead of
-// re-deriving it with their own snake_case (sprig `snakecase` diverges from
-// textutil.ToDatabaseColumnName on acronyms, e.g. `IPv4Address`).
+// re-deriving it with their own snake_case (the template `snakecase` diverges
+// from textutil.ToDatabaseColumnName on acronyms, e.g. `IPv4Address`).
 func (e IREntity) TableName() string {
 	return textutil.ToDatabaseColumnName(e.NamePlural)
 }

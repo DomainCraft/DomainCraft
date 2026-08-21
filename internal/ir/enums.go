@@ -5,7 +5,7 @@ import "github.com/DomainCraft/DomainCraft/pkg/textutil"
 // IREnumValue is one enum value plus its stable, language-agnostic wire form.
 // The wire value (snake_case) is the contract representation of the value: it is
 // what the API serializes, what filters match, and what a bridge stores. Bridges
-// print .WireValue instead of re-deriving snake_case themselves — sprig
+// print .WireValue instead of re-deriving snake_case themselves — the template
 // `snakecase` diverges from textutil.ToDatabaseColumnName on acronyms (e.g.
 // `IPv4`), so the wire form must be computed once, in the core.
 type IREnumValue struct {

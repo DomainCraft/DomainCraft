@@ -207,7 +207,7 @@ If a type is missing from the mapping, it passes through as-is (e.g. `float64` w
 
 ### Step 4: Create Templates
 
-Templates use Go's `text/template` syntax with [Sprig](https://masterminds.github.io/sprig/) functions plus these custom functions:
+Templates use Go's `text/template` syntax with the core's stdlib-backed function set (`internal/templatefuncs` — sprig was removed in v0.6.0; every function a bridge template calls must exist there) plus these custom functions:
 
 | Function | Description | Example |
 |----------|-------------|---------|

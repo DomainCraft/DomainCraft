@@ -55,8 +55,8 @@ func (e IREntity) AllIndexes() []IRIndex {
 // DatabaseName returns the canonical database index name: the "IX_" prefix plus
 // the snake_case index name. Bridges print this instead of re-deriving
 // `IX_{{ .Name | snakecase }}`, which double-prefixes and re-snake_cases a name
-// the core already computed (sprig `snakecase` diverges from the core's column
-// naming on acronyms).
+// the core already computed (the template `snakecase` diverges from the core's
+// column naming on acronyms).
 func (i IRIndex) DatabaseName() string {
 	return "IX_" + i.Name
 }

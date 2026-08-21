@@ -137,7 +137,7 @@ func TestIREntityTableNameAndForeignKeyColumnName(t *testing.T) {
 
 	r := IRRelation{FieldName: "ipv4Address"}
 	if got := r.ForeignKeyColumnName(); got != "ipv4address_id" {
-		t.Errorf("ForeignKeyColumnName() = %q, want %q (must match ToDatabaseColumnName, not sprig snakecase)", got, "ipv4address_id")
+		t.Errorf("ForeignKeyColumnName() = %q, want %q (must match ToDatabaseColumnName, not template snakecase)", got, "ipv4address_id")
 	}
 	// A field already suffixed with Id must not get a double Id.
 	if got := (IRRelation{FieldName: "orderId"}).ForeignKeyColumnName(); got != "order_id" {
