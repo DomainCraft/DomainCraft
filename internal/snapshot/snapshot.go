@@ -10,11 +10,12 @@
 package snapshot
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -230,7 +231,7 @@ func ComputeDiff(old *Snapshot, project *ir.IRProject, outputDir string) *Diff {
 		files := existingFileRefs(outputDir, filesByEntity[oldName])
 		diff.Renamed = append(diff.Renamed, Rename{OldName: oldName, NewName: newName, Files: files})
 	}
-	sort.Slice(diff.Renamed, func(i, j int) bool { return diff.Renamed[i].OldName < diff.Renamed[j].OldName })
+	slices.SortFunc(diff.Renamed, func(a, b Rename) int { return cmp.Compare(a.OldName, b.OldName) })
 
 	// Deleted entities (in the snapshot, not in the current model, not renamed).
 	for oldName := range old.Entities {
@@ -243,7 +244,7 @@ func ComputeDiff(old *Snapshot, project *ir.IRProject, outputDir string) *Diff {
 		files := existingFileRefs(outputDir, filesByEntity[oldName])
 		diff.Deleted = append(diff.Deleted, DeletedEntity{Name: oldName, Files: files})
 	}
-	sort.Slice(diff.Deleted, func(i, j int) bool { return diff.Deleted[i].Name < diff.Deleted[j].Name })
+	slices.SortFunc(diff.Deleted, func(a, b DeletedEntity) int { return cmp.Compare(a.Name, b.Name) })
 
 	// Field type changes for entities that still exist (possibly under a new name).
 	for oldName, oldState := range old.Entities {
@@ -274,11 +275,11 @@ func ComputeDiff(old *Snapshot, project *ir.IRProject, outputDir string) *Diff {
 			})
 		}
 	}
-	sort.Slice(diff.TypeChanges, func(i, j int) bool {
-		if diff.TypeChanges[i].Entity != diff.TypeChanges[j].Entity {
-			return diff.TypeChanges[i].Entity < diff.TypeChanges[j].Entity
+	slices.SortFunc(diff.TypeChanges, func(a, b TypeChange) int {
+		if c := cmp.Compare(a.Entity, b.Entity); c != 0 {
+			return c
 		}
-		return diff.TypeChanges[i].Field < diff.TypeChanges[j].Field
+		return cmp.Compare(a.Field, b.Field)
 	})
 
 	// Field renames (via the field-level `old_name` modifier). Detected when the
@@ -323,11 +324,11 @@ func ComputeDiff(old *Snapshot, project *ir.IRProject, outputDir string) *Diff {
 			})
 		}
 	}
-	sort.Slice(diff.FieldRenames, func(i, j int) bool {
-		if diff.FieldRenames[i].Entity != diff.FieldRenames[j].Entity {
-			return diff.FieldRenames[i].Entity < diff.FieldRenames[j].Entity
+	slices.SortFunc(diff.FieldRenames, func(a, b FieldRename) int {
+		if c := cmp.Compare(a.Entity, b.Entity); c != 0 {
+			return c
 		}
-		return diff.FieldRenames[i].OldField < diff.FieldRenames[j].OldField
+		return cmp.Compare(a.OldField, b.OldField)
 	})
 
 	// Project rename: custom (overwrite: false) files carry the old root namespace
@@ -361,7 +362,7 @@ func detectNamespaceMismatch(outputDir string, old *Snapshot, oldNamespace, newN
 	if len(affected) == 0 {
 		return nil
 	}
-	sort.Strings(affected)
+	slices.Sort(affected)
 	return &NamespaceMismatch{OldNamespace: oldNamespace, NewNamespace: newNamespace, Files: affected}
 }
 
@@ -423,7 +424,7 @@ func existingFileRefs(outputDir string, files []renderer.RenderedFile) []FileRef
 		}
 		refs = append(refs, FileRef{Path: f.Path, Custom: f.Custom})
 	}
-	sort.Slice(refs, func(i, j int) bool { return refs[i].Path < refs[j].Path })
+	slices.SortFunc(refs, func(a, b FileRef) int { return cmp.Compare(a.Path, b.Path) })
 	return refs
 }
 
@@ -435,7 +436,7 @@ func existingFilePaths(outputDir string, relPaths []string) []string {
 			result = append(result, rel)
 		}
 	}
-	sort.Strings(result)
+	slices.Sort(result)
 	return result
 }
 

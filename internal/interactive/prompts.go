@@ -270,7 +270,7 @@ func (f *field) draw(lines []string) {
 		// back up" would shift the block down by n-1 lines on every redraw
 		// and make the terminal scroll ("run away").
 		fmt.Fprintf(promptOutput, "\x1b[%dA", n)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if i > 0 {
 				fmt.Fprint(promptOutput, "\n")
 			}
@@ -283,7 +283,7 @@ func (f *field) draw(lines []string) {
 	}
 	// Clear the leftover lines below when the new block is shorter.
 	if old := len(f.lines); old > len(fitted) {
-		for i := 0; i < old-len(fitted); i++ {
+		for range old - len(fitted) {
 			fmt.Fprint(promptOutput, "\x1b[1B\x1b[2K")
 		}
 		fmt.Fprintf(promptOutput, "\x1b[%dA", old-len(fitted))

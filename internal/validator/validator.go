@@ -1,10 +1,12 @@
 package validator
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -71,14 +73,17 @@ func (v *Validator) Validate() []ValidationError {
 
 	errs = append(errs, v.validateCircularRelations()...)
 
-	sort.SliceStable(errs, func(i, j int) bool {
-		if errs[i].Warning != errs[j].Warning {
-			return !errs[i].Warning // errors first
+	slices.SortStableFunc(errs, func(a, b ValidationError) int {
+		if a.Warning != b.Warning {
+			if a.Warning {
+				return 1 // errors first
+			}
+			return -1
 		}
-		if errs[i].Entity == errs[j].Entity {
-			return errs[i].Field < errs[j].Field
+		if c := cmp.Compare(a.Entity, b.Entity); c != 0 {
+			return c
 		}
-		return errs[i].Entity < errs[j].Entity
+		return cmp.Compare(a.Field, b.Field)
 	})
 
 	return errs
@@ -269,13 +274,7 @@ func (v *Validator) validateCircularRelations() []ValidationError {
 		}
 	}
 
-	sorted := make([]string, 0, len(inCycle))
-	for name := range inCycle {
-		sorted = append(sorted, name)
-	}
-	sort.Strings(sorted)
-
-	for _, entityName := range sorted {
+	for _, entityName := range slices.Sorted(maps.Keys(inCycle)) {
 		errs = append(errs, ValidationError{
 			Entity:  entityName,
 			Message: "entity is part of a circular relation chain (A → B → … → A); generated delete/seed ordering may be ambiguous",
@@ -435,12 +434,7 @@ func (v *Validator) validateEnums() []ValidationError {
 				}
 			}
 		}
-		enumNames := make([]string, 0, len(v.schema.Enums))
-		for name := range v.schema.Enums {
-			enumNames = append(enumNames, name)
-		}
-		sort.Strings(enumNames)
-		for _, enumName := range enumNames {
+		for _, enumName := range slices.Sorted(maps.Keys(v.schema.Enums)) {
 			if !usedEnums[enumName] {
 				errs = append(errs, ValidationError{Entity: "<enum>", Field: enumName, Message: "enum is declared but never used by any entity field", Warning: true})
 			}

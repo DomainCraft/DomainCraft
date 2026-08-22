@@ -1,7 +1,8 @@
 package ir
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 
 	"github.com/DomainCraft/DomainCraft/pkg/textutil"
 )
@@ -179,7 +180,7 @@ func (e IREntity) FilterablePaths() []FilterPathSpec {
 		}
 	}
 
-	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	slices.SortFunc(out, func(a, b FilterPathSpec) int { return cmp.Compare(a.Path, b.Path) })
 	return out
 }
 

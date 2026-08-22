@@ -2,7 +2,8 @@ package ir
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/DomainCraft/DomainCraft/internal/parser"
@@ -356,7 +357,7 @@ func sortEntities(entities []IREntity) []IREntity {
 		}
 	}
 	// Deterministic ordering: process ready entities in name order.
-	sort.Strings(ready)
+	slices.Sort(ready)
 
 	order := make([]string, 0, len(entities))
 	for len(ready) > 0 {
@@ -371,7 +372,7 @@ func sortEntities(entities []IREntity) []IREntity {
 				if inDegree[i] == 0 {
 					// Insert in sorted order to keep processing deterministic.
 					ready = append(ready, entities[i].Name)
-					sort.Strings(ready)
+					slices.Sort(ready)
 				}
 			}
 		}
@@ -389,7 +390,7 @@ func sortEntities(entities []IREntity) []IREntity {
 				remaining = append(remaining, e.Name)
 			}
 		}
-		sort.Strings(remaining)
+		slices.Sort(remaining)
 		order = append(order, remaining...)
 	}
 
@@ -425,13 +426,8 @@ func convertValidations(source map[string]string) []IRValidation {
 	if len(source) == 0 {
 		return nil
 	}
-	keys := make([]string, 0, len(source))
-	for key := range source {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
 	result := make([]IRValidation, 0, len(source))
-	for _, key := range keys {
+	for _, key := range slices.Sorted(maps.Keys(source)) {
 		result = append(result, IRValidation{Name: key, Value: source[key]})
 	}
 	return result
@@ -533,14 +529,7 @@ func convertAuth(source *parser.AuthConfig, schema *parser.ParsedSchema) *IRAuth
 }
 
 func copyFeatureMap(source map[string]bool) map[string]bool {
-	if source == nil {
-		return nil
-	}
-	result := make(map[string]bool, len(source))
-	for k, v := range source {
-		result[k] = v
-	}
-	return result
+	return maps.Clone(source)
 }
 
 // copyEnumsSorted returns a deep copy of the enums map with sorted keys for deterministic iteration.
@@ -559,10 +548,5 @@ func copyEnumsSorted(source map[string][]string) map[string][]string {
 
 // sortedEnumKeys returns a sorted slice of enum names for deterministic iteration.
 func sortedEnumKeys(source map[string][]string) []string {
-	keys := make([]string, 0, len(source))
-	for k := range source {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+	return slices.Sorted(maps.Keys(source))
 }

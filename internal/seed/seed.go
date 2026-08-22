@@ -46,7 +46,7 @@ func Generate(project *ir.IRProject, opts Options) *ir.SeedDataset {
 		entity := &project.Entities[i]
 		em := ir.SeedEntity{Name: entity.Name}
 
-		for n := 0; n < opts.CountPerEntity; n++ {
+		for n := range opts.CountPerEntity {
 			rec := ir.SeedRecord{}
 			for _, field := range entity.Fields {
 				// Sensitive fields (e.g. password) are never auto-mocked — the auth

@@ -89,7 +89,7 @@ func Append(list interface{}, v interface{}) []interface{} {
 	case reflect.Slice, reflect.Array:
 		l := val.Len()
 		nl := make([]interface{}, l)
-		for i := 0; i < l; i++ {
+		for i := range l {
 			nl[i] = val.Index(i).Interface()
 		}
 		return append(nl, v)
@@ -263,7 +263,7 @@ func strslice(v interface{}) []string {
 		case reflect.Array, reflect.Slice:
 			l := val.Len()
 			b := make([]string, 0, l)
-			for i := 0; i < l; i++ {
+			for i := range l {
 				value := val.Index(i).Interface()
 				if value != nil {
 					b = append(b, ToString(value))

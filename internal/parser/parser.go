@@ -2,7 +2,8 @@ package parser
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/DomainCraft/DomainCraft/internal/lexer"
@@ -120,7 +121,7 @@ func (p *Parser) Parse() (*ParsedSchema, error) {
 	}
 
 	// Sort for deterministic order
-	sort.Strings(schema.EntityOrder)
+	slices.Sort(schema.EntityOrder)
 
 	return schema, nil
 }
@@ -240,11 +241,7 @@ func (p *Parser) parseField(name string, fieldDef string) (*ParsedField, error) 
 // Uses specmeta.FeatureFieldDefs as the single source of truth.
 func (p *Parser) addFeatureFields(entity *ParsedEntity) error {
 	// Iterate in sorted order for deterministic field generation.
-	names := make([]string, 0, len(specmeta.FeatureFieldDefs))
-	for name := range specmeta.FeatureFieldDefs {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(specmeta.FeatureFieldDefs))
 	for _, fieldName := range names {
 		def := specmeta.FeatureFieldDefs[fieldName]
 		if !entity.Features[def.Feature] {

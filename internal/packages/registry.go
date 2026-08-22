@@ -65,7 +65,7 @@ func VersionGreater(a, b string) bool {
 	if len(bParts) > maxLen {
 		maxLen = len(bParts)
 	}
-	for i := 0; i < maxLen; i++ {
+	for i := range maxLen {
 		var ai, bi int
 		if i < len(aParts) {
 			fmt.Sscanf(aParts[i], "%d", &ai)

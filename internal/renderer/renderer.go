@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -246,15 +247,15 @@ func mergeTypeMappings(base, overlay *typeMappings) *typeMappings {
 		Behaviors:      mergeStrings(base.Behaviors, overlay.Behaviors),
 		InputTypes:     mergeStrings(base.InputTypes, overlay.InputTypes),
 		ColumnSizes:    mergeStrings(base.ColumnSizes, overlay.ColumnSizes),
-		ArrayFormat:    firstNonEmpty(overlay.ArrayFormat, base.ArrayFormat),
-		NullableFormat: firstNonEmpty(overlay.NullableFormat, base.NullableFormat),
+		ArrayFormat:    cmp.Or(overlay.ArrayFormat, base.ArrayFormat),
+		NullableFormat: cmp.Or(overlay.NullableFormat, base.NullableFormat),
 		EnumNullable:   overlay.EnumNullable || base.EnumNullable,
 		ValueTypes:     overlay.ValueTypes,
 		Literals:       mergeLiterals(base.Literals, overlay.Literals),
 		Array: ArrayLiteralSpec{
-			Open:  firstNonEmpty(overlay.Array.Open, base.Array.Open),
-			Close: firstNonEmpty(overlay.Array.Close, base.Array.Close),
-			Empty: firstNonEmpty(overlay.Array.Empty, base.Array.Empty),
+			Open:  cmp.Or(overlay.Array.Open, base.Array.Open),
+			Close: cmp.Or(overlay.Array.Close, base.Array.Close),
+			Empty: cmp.Or(overlay.Array.Empty, base.Array.Empty),
 		},
 	}
 	if len(out.ValueTypes) == 0 {
@@ -275,13 +276,6 @@ func mergeLiterals(base, overlay map[string]LiteralSpec) map[string]LiteralSpec 
 		m[k] = v
 	}
 	return m
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }
 
 // getBridgeSpecificFuncs loads type_mappings from every bridge in the chain

@@ -1,7 +1,7 @@
 package ir
 
 import (
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -73,7 +73,7 @@ func (e IREntity) Endpoints() []IREndpoint {
 	updateErrors := []int{400, 401, 403, 404, 429}
 	if e.HasOptimisticLock() {
 		updateErrors = append(updateErrors, 409)
-		sort.Ints(updateErrors)
+		slices.Sort(updateErrors)
 	}
 
 	eps := []IREndpoint{

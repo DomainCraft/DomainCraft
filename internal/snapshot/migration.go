@@ -11,7 +11,8 @@ package snapshot
 // a RenameTable/RenameColumn preserves data, whereas a Drop+Add would not.
 
 import (
-	"sort"
+	"maps"
+	"slices"
 
 	"github.com/DomainCraft/DomainCraft/internal/ir"
 	"github.com/DomainCraft/DomainCraft/pkg/textutil"
@@ -48,7 +49,7 @@ func ComputeMigrationPlan(old *Snapshot, project *ir.IRProject) *ir.MigrationPla
 	for _, e := range project.Entities {
 		newEntityNames = append(newEntityNames, e.Name)
 	}
-	sort.Strings(newEntityNames)
+	slices.Sort(newEntityNames)
 	for _, name := range newEntityNames {
 		e := newByName[name]
 		if _, existed := oldEntities[name]; existed {
@@ -82,7 +83,7 @@ func ComputeMigrationPlan(old *Snapshot, project *ir.IRProject) *ir.MigrationPla
 			renamedOldNames = append(renamedOldNames, oldName)
 		}
 	}
-	sort.Strings(renamedOldNames)
+	slices.Sort(renamedOldNames)
 	for _, oldName := range renamedOldNames {
 		e := newByOldName[oldName]
 		plan.Operations = append(plan.Operations, ir.MigrationOp{
@@ -95,11 +96,7 @@ func ComputeMigrationPlan(old *Snapshot, project *ir.IRProject) *ir.MigrationPla
 	}
 
 	// DropTable: entity existed before but is gone now (and not renamed).
-	oldEntityNames := make([]string, 0, len(oldEntities))
-	for name := range oldEntities {
-		oldEntityNames = append(oldEntityNames, name)
-	}
-	sort.Strings(oldEntityNames)
+	oldEntityNames := slices.Sorted(maps.Keys(oldEntities))
 	for _, name := range oldEntityNames {
 		if _, stillExists := newByName[name]; stillExists {
 			continue
@@ -161,7 +158,7 @@ func diffColumns(plan *ir.MigrationPlan, oldState EntityState, e *ir.IREntity) {
 			renamedFields = append(renamedFields, f.Name)
 		}
 	}
-	sort.Strings(renamedFields)
+	slices.Sort(renamedFields)
 	for _, fieldName := range renamedFields {
 		f := newFieldByName[fieldName]
 		oldColumn := f.OldDatabaseColumnName
@@ -223,11 +220,7 @@ func diffColumns(plan *ir.MigrationPlan, oldState EntityState, e *ir.IREntity) {
 	}
 
 	// DropColumn: field existed before but is gone now (and not renamed).
-	oldFieldNames := make([]string, 0, len(oldFields))
-	for fn := range oldFields {
-		oldFieldNames = append(oldFieldNames, fn)
-	}
-	sort.Strings(oldFieldNames)
+	oldFieldNames := slices.Sorted(maps.Keys(oldFields))
 	for _, fn := range oldFieldNames {
 		if _, stillExists := newFieldByName[fn]; stillExists {
 			continue

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"strings"
 
 	"github.com/DomainCraft/DomainCraft/internal/bridge"
@@ -427,9 +428,7 @@ func resolveBaseChain(adapterDir, baseRef string, log *logger.Logger) ([]string,
 	}
 
 	// Reverse so the outermost base comes first (it renders first).
-	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
-		chain[i], chain[j] = chain[j], chain[i]
-	}
+	slices.Reverse(chain)
 	return chain, nil
 }
 

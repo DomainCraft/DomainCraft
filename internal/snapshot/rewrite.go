@@ -11,9 +11,10 @@ package snapshot
 
 import (
 	"bytes"
+	"cmp"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/DomainCraft/DomainCraft/internal/fsutil"
@@ -32,11 +33,11 @@ func rewriteCasings(content []byte, variants map[string]string) []byte {
 	for k := range variants {
 		keys = append(keys, k)
 	}
-	sort.Slice(keys, func(i, j int) bool {
-		if len(keys[i]) != len(keys[j]) {
-			return len(keys[i]) > len(keys[j])
+	slices.SortFunc(keys, func(a, b string) int {
+		if c := cmp.Compare(len(b), len(a)); c != 0 {
+			return c
 		}
-		return keys[i] < keys[j]
+		return cmp.Compare(a, b)
 	})
 
 	out := content

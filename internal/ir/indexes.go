@@ -1,7 +1,8 @@
 package ir
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 
 	"github.com/DomainCraft/DomainCraft/pkg/textutil"
 )
@@ -48,7 +49,7 @@ func (e IREntity) AllIndexes() []IRIndex {
 		})
 	}
 
-	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	slices.SortFunc(result, func(a, b IRIndex) int { return cmp.Compare(a.Name, b.Name) })
 	return result
 }
 
@@ -65,7 +66,7 @@ func (i IRIndex) DatabaseName() string {
 // so bridges can index-safely pair each field with its direction.
 func normalizeSort(sort []string, n int) []string {
 	out := make([]string, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i < len(sort) && sort[i] != "" {
 			out[i] = sort[i]
 		} else {
