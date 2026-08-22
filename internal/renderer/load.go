@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"text/template"
 
 	"github.com/DomainCraft/DomainCraft/internal/ir"
@@ -53,6 +54,8 @@ func (r *Renderer) adapterDir() string {
 	return r.sources[len(r.sources)-1].dir
 }
 
+var layerRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
 // loadSource loads a single bridge directory (its bridge.yaml).
 func loadSource(bridgePath string) (sourceConfig, error) {
 	bridgeDir, configPath := resolveBridgePath(bridgePath)
@@ -64,6 +67,9 @@ func loadSource(bridgePath string) (sourceConfig, error) {
 	var config BridgeConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return sourceConfig{}, fmt.Errorf("parse bridge config: %w", err)
+	}
+	if config.Layer != "" && !layerRe.MatchString(config.Layer) {
+		return sourceConfig{}, fmt.Errorf("invalid layer %q: must match %s", config.Layer, layerRe.String())
 	}
 	if config.OutputDir == "" {
 		config.OutputDir = "generated"
@@ -104,8 +110,27 @@ func (r *Renderer) AttachBases(basePaths []string) error {
 
 // MigrationConfig exposes the bridge's declared database-migration commands
 // (from bridge.yaml manifest), used by `domaincraft generate --migrate`.
+// It scans the composed chain top-down and returns the first enabled config,
+// so a persistence bridge's migrations are found even when the top adapter
+// has no migrations (e.g. csharp-rest → csharp-efcore).
 func (r *Renderer) MigrationConfig() *MigrationConfig {
-	return r.config().Migrations
+	for i := len(r.sources) - 1; i >= 0; i-- {
+		cfg := r.sources[i].config.Migrations
+		if cfg != nil && cfg.Enabled {
+			return cfg
+		}
+	}
+	return nil
+}
+
+// Layer returns the layer identifier of the topmost bridge.
+func (r *Renderer) Layer() string {
+	return r.config().Layer
+}
+
+// Config returns the topmost bridge config.
+func (r *Renderer) Config() BridgeConfig {
+	return r.config()
 }
 
 // SetMigration attaches the core-computed schema migration plan to this renderer.

@@ -37,6 +37,7 @@ var (
 	migrateFlag    bool   // --migrate: run the bridge's database-migration commands after generation
 	updateBridges  bool   // --update-bridges: download newer bridge versions before generating
 	checkUpdates   bool   // bridges --check-updates: contact remotes and report outdated cached bridges
+	replaceFlags   []string
 
 	// version is stamped at build time via -ldflags "-X main.version=vX.Y.Z" and,
 	// when it isn't, backed by the module version in build info (see init).
@@ -177,16 +178,19 @@ func newGenerateCmd() *cobra.Command {
 			seedData := seed.Normalize(irProject)
 			mockDataset := seed.Generate(irProject, seed.Options{})
 
-			log.Info("Rendering via %s", bridgePath)
-			rendererInstance, err := renderer.New(bridgePath, log)
+			// Parse --replace flags (layer|bridgeId=bridgeRef).
+			replacements, err := parseReplaceFlags(replaceFlags)
 			if err != nil {
 				return err
 			}
-			// Bridge composition: an adapter bridge may declare `extends: <base>`
-			// (a path, registry ID or owner/repo). Resolve the whole base chain and
-			// attach it so the adapter renders on top of the shared base bridge
-			// (e.g. react-rest extends ts-core).
-			basePaths, err := resolveBaseChain(bridgePath, rendererInstance.Extends(), log)
+			// Resolve extends chain with optional node replacements.
+			newBridgePath, basePaths, err := resolveChainWithReplacements(bridgePath, replacements, log)
+			if err != nil {
+				return err
+			}
+			bridgePath = newBridgePath
+			log.Info("Rendering via %s", bridgePath)
+			rendererInstance, err := renderer.New(bridgePath, log)
 			if err != nil {
 				return err
 			}
@@ -310,6 +314,7 @@ func newGenerateCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&prune, "prune", false, "automatically remove/rename orphaned files and rewrite renamed identifiers in custom files, then run the bridge's database migrations (best-effort) when the schema changed (no prompts; CI-safe)")
 	// --migrate — after generation, run the bridge's declared database-migration commands.
 	cmd.Flags().BoolVar(&migrateFlag, "migrate", false, "run the bridge's database-migration commands after generation (e.g. dotnet ef database update)")
+	cmd.Flags().StringArrayVar(&replaceFlags, "replace", nil, "replace a bridge in the extends chain: layer=bridgeRef or bridgeId=bridgeRef (repeatable)")
 
 	return cmd
 }
@@ -430,6 +435,154 @@ func resolveBaseChain(adapterDir, baseRef string, log *logger.Logger) ([]string,
 	// Reverse so the outermost base comes first (it renders first).
 	slices.Reverse(chain)
 	return chain, nil
+}
+
+// replaceEntry is one --replace flag: left (= layer or bridge name) -> right (bridge ref).
+type replaceEntry struct {
+	left  string
+	right string
+}
+
+func parseReplaceFlags(raw []string) ([]replaceEntry, error) {
+	var out []replaceEntry
+	for _, s := range raw {
+		parts := strings.SplitN(s, "=", 2)
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+			return nil, fmt.Errorf("invalid --replace %q: expected layer|bridgeId=bridgeRef", s)
+		}
+		out = append(out, replaceEntry{left: strings.TrimSpace(parts[0]), right: strings.TrimSpace(parts[1])})
+	}
+	return out, nil
+}
+
+// bridgeLayerAndName loads bridge.yaml for dir and returns layer and name.
+func bridgeLayerAndName(dir string, log *logger.Logger) (string, string, error) {
+	r, err := renderer.New(dir, log)
+	if err != nil {
+		return "", "", err
+	}
+	cfg := r.Config()
+	return cfg.Layer, cfg.Name, nil
+}
+
+// buildFullChainTopFirst builds the full chain top-first: [entry, base1, base2, ... deepest].
+func buildFullChainTopFirst(entryDir string, log *logger.Logger) ([]string, error) {
+	resolver := bridge.NewResolver(bridge.Default()).WithEnsureOptions(bridgeEnsureOptions(log))
+	var chain []string
+	visited := make(map[string]bool)
+	curDir := entryDir
+	for {
+		abs, err := filepath.Abs(curDir)
+		if err == nil {
+			curDir = abs
+		}
+		if visited[curDir] {
+			return nil, fmt.Errorf("bridge `extends` cycle detected at %q", curDir)
+		}
+		visited[curDir] = true
+		chain = append(chain, curDir)
+		r, err := renderer.New(curDir, log)
+		if err != nil {
+			return nil, err
+		}
+		ext := r.Extends()
+		if ext == "" {
+			break
+		}
+		next, err := resolveExtendsRef(ext, curDir, resolver)
+		if err != nil {
+			return nil, fmt.Errorf("resolve bridge `extends: %s`: %w", ext, err)
+		}
+		if abs, err := filepath.Abs(next); err == nil {
+			next = abs
+		}
+		curDir = next
+	}
+	return chain, nil
+}
+
+// resolveChainWithReplacements resolves the extends chain with --replace overrides.
+// It returns the (possibly replaced) entry dir and base paths outermost-first.
+func resolveChainWithReplacements(entryDir string, reps []replaceEntry, log *logger.Logger) (string, []string, error) {
+	if len(reps) == 0 {
+		r, err := renderer.New(entryDir, log)
+		if err != nil {
+			return "", nil, err
+		}
+		bases, err := resolveBaseChain(entryDir, r.Extends(), log)
+		return entryDir, bases, err
+	}
+	resolver := bridge.NewResolver(bridge.Default()).WithEnsureOptions(bridgeEnsureOptions(log))
+	fullChain, err := buildFullChainTopFirst(entryDir, log)
+	if err != nil {
+		return "", nil, err
+	}
+	for _, rep := range reps {
+		// Find target index by layer or name.
+		targetIdx := -1
+		var targetLayer string
+		for i, dir := range fullChain {
+			layer, name, err := bridgeLayerAndName(dir, log)
+			if err != nil {
+				return "", nil, err
+			}
+			if layer == rep.left || name == rep.left {
+				targetIdx = i
+				targetLayer = layer
+				break
+			}
+		}
+		if targetIdx == -1 {
+			return "", nil, fmt.Errorf("no bridge with layer or name %q in chain %v", rep.left, fullChain)
+		}
+		// Resolve replacement bridge.
+		rightPath, err := resolveExtendsRef(rep.right, entryDir, resolver)
+		if err != nil {
+			return "", nil, fmt.Errorf("resolve --replace %s=%s: %w", rep.left, rep.right, err)
+		}
+		if abs, err := filepath.Abs(rightPath); err == nil {
+			rightPath = abs
+		}
+		rightLayer, rightName, err := bridgeLayerAndName(rightPath, log)
+		if err != nil {
+			return "", nil, err
+		}
+		// Warn on layer mismatch (both non-empty and different).
+		if targetLayer != "" && rightLayer != "" && targetLayer != rightLayer && log != nil {
+			log.Warn("layer mismatch: replacing %q (layer=%q) with %q (layer=%q)", rep.left, targetLayer, rightName, rightLayer)
+		}
+		// Build replacement's full chain top-first.
+		rightChain, err := buildFullChainTopFirst(rightPath, log)
+		if err != nil {
+			return "", nil, err
+		}
+		// Splice: fullChain[:targetIdx] + rightChain (replaces tail after targetIdx)
+		newChain := make([]string, 0, len(fullChain[:targetIdx])+len(rightChain))
+		newChain = append(newChain, fullChain[:targetIdx]...)
+		newChain = append(newChain, rightChain...)
+		// Validate no duplicate layer and no cycle.
+		seenLayer := make(map[string]string)
+		seenPath := make(map[string]bool)
+		for _, d := range newChain {
+			abs, _ := filepath.Abs(d)
+			if seenPath[abs] {
+				return "", nil, fmt.Errorf("bridge `extends` cycle detected at %q", d)
+			}
+			seenPath[abs] = true
+			layer, _, _ := bridgeLayerAndName(d, log)
+			if layer != "" {
+				if prev, ok := seenLayer[layer]; ok {
+					return "", nil, fmt.Errorf("duplicate layer %q: %q and %q", layer, prev, d)
+				}
+				seenLayer[layer] = d
+			}
+		}
+		fullChain = newChain
+	}
+	newEntry := fullChain[0]
+	tail := fullChain[1:]
+	slices.Reverse(tail)
+	return newEntry, tail, nil
 }
 
 // resolveExtendsRef resolves one `extends` reference. For a registry ID it first

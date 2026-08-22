@@ -9,6 +9,7 @@ type BridgeConfig struct {
 	Name             string            `yaml:"name"`
 	Description      string            `yaml:"description"`
 	OutputDir        string            `yaml:"output_dir"`
+	Layer            string            `yaml:"layer"`             // Optional open layer identifier [a-z][a-z0-9_]* (e.g. domain/persistence/transport or core/framework/offline)
 	Extends          string            `yaml:"extends"`           // Optional base bridge (path / registry ID / owner-repo) this bridge composes on top of
 	Helpers          string            `yaml:"helpers"`           // Optional shared template file with named templates
 	RegistryURL      string            `yaml:"registry_url"`      // URL template for package registry ({id} = lowercase package ID)

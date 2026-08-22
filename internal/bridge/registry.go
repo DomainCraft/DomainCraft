@@ -13,6 +13,27 @@ type RegistryEntry struct {
 // Extend this slice to add new bridges without changing any other code.
 var DefaultRegistry = []RegistryEntry{
 	{
+		ID:          "csharp-core",
+		Name:        "C# Core",
+		Description: "Domain + Application layer for C# (entities, ports, service hooks)",
+		Language:    "C#",
+		GitHub:      "DomainCraft/domaincraft-bridge-csharp-core",
+	},
+	{
+		ID:          "csharp-efcore",
+		Name:        "C# EF Core",
+		Description: "EF Core persistence layer for DomainCraft C# (extends csharp-core)",
+		Language:    "C#",
+		GitHub:      "DomainCraft/domaincraft-bridge-csharp-efcore",
+	},
+	{
+		ID:          "csharp-rest",
+		Name:        "C# REST",
+		Description: "ASP.NET Core REST transport for DomainCraft C# (extends csharp-efcore)",
+		Language:    "C#",
+		GitHub:      "DomainCraft/domaincraft-bridge-csharp-rest",
+	},
+	{
 		ID:          "csharp-restful",
 		Name:        "C# REST API",
 		Description: "ASP.NET Core + EF Core + PostgreSQL + JWT + Clean Architecture",
