@@ -146,3 +146,44 @@ func TestIREntity_RelationFields(t *testing.T) {
 		t.Errorf("unexpected field: %v", result[0].Name)
 	}
 }
+
+// TestCanonicalNameContract pins the core-owned DB names bridges must print
+// (TableName, ColumnName, ForeignKeyColumnName) instead of re-deriving them
+// with the template `snakecase`, which diverges on acronyms.
+func TestCanonicalNameContract(t *testing.T) {
+	e := IREntity{Name: "OrderItem", NamePlural: "OrderItems"}
+	if got := e.TableName(); got != "order_items" {
+		t.Errorf("TableName() = %q, want order_items", got)
+	}
+
+	relation := IRRelation{FieldName: "category"}
+	if got := relation.ForeignKeyColumnName(); got != "category_id" {
+		t.Errorf("ForeignKeyColumnName() = %q, want category_id", got)
+	}
+
+	cases := []struct {
+		name string
+		f    IRField
+		want string
+	}{
+		{"relation field uses the FK name", IRField{Name: "categoryId", IsRelation: true}, "category_id"},
+		{"parser-computed column wins", IRField{Name: "skuCode", DatabaseColumnName: "sku_code"}, "sku_code"},
+		{"fallback re-derives from the name", IRField{Name: "createdAt"}, "created_at"},
+	}
+	for _, c := range cases {
+		if got := c.f.ColumnName(); got != c.want {
+			t.Errorf("%s: ColumnName() = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestEagerLoadNavigation(t *testing.T) {
+	r := IRRelation{FieldName: "orders", NavigationName: "Order", IsMany: true}
+	if got := r.EagerLoadNavigation(); got != "orders" {
+		t.Errorf("[many] navigation = %q, want the collection property orders", got)
+	}
+	r = IRRelation{FieldName: "customerId", NavigationName: "Customer"}
+	if got := r.EagerLoadNavigation(); got != "Customer" {
+		t.Errorf("single FK navigation = %q, want Customer", got)
+	}
+}

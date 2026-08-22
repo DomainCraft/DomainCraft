@@ -226,7 +226,7 @@ func TestComputeDiffFieldRename(t *testing.T) {
 	old := &Snapshot{
 		Entities: map[string]EntityState{
 			"Product": {
-				Fields:      map[string]string{"id": "uuid", "title": "string"},
+				Fields:        map[string]string{"id": "uuid", "title": "string"},
 				FieldOldNames: map[string]string{},
 			},
 		},
@@ -325,7 +325,6 @@ func TestComputeDiffChainedFieldRename(t *testing.T) {
 		t.Errorf("chained rename report should warn about the unapplied chain, got:\n%s", report)
 	}
 }
-
 
 func TestComputeDiffFieldRenameSkipsTypeChangeOnly(t *testing.T) {
 	dir := t.TempDir()
@@ -506,7 +505,7 @@ func TestComputeDiffFieldRenameWithTypeChange(t *testing.T) {
 	old := &Snapshot{
 		Entities: map[string]EntityState{
 			"Product": {
-				Fields:      map[string]string{"id": "uuid", "title": "string"},
+				Fields:        map[string]string{"id": "uuid", "title": "string"},
 				FieldOldNames: map[string]string{},
 			},
 		},
@@ -763,4 +762,33 @@ func writeTestFile(t *testing.T, root, rel string) {
 	if err := os.WriteFile(abs, []byte("// generated\n"), 0o644); err != nil {
 		t.Fatalf("write %s: %v", rel, err)
 	}
+}
+
+func TestTypeChangeReport(t *testing.T) {
+	t.Run("empty diff yields empty report", func(t *testing.T) {
+		d := &Diff{}
+		if got := d.TypeChangeReport(); got != "" {
+			t.Errorf("report = %q, want empty", got)
+		}
+	})
+
+	t.Run("lists changes and custom files", func(t *testing.T) {
+		d := &Diff{TypeChanges: []TypeChange{
+			{Entity: "Product", Field: "price", OldType: "decimal", NewType: "int", CustomFiles: []string{"src/Services/ProductService.cs"}},
+			{Entity: "Order", Field: "note", OldType: "text", NewType: "string"},
+		}}
+
+		report := d.TypeChangeReport()
+
+		for _, want := range []string{
+			"Product (Field: price)", "decimal -> int",
+			"src/Services/ProductService.cs",
+			"Order (Field: note)",
+			"no custom files recorded",
+		} {
+			if !strings.Contains(report, want) {
+				t.Errorf("report missing %q:\n%s", want, report)
+			}
+		}
+	})
 }

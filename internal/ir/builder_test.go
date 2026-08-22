@@ -795,3 +795,108 @@ func TestBuildPairNavigationNameStripsIdSuffix(t *testing.T) {
 		t.Errorf("items.PairNavigationName = %q, want Order", items.PairNavigationName)
 	}
 }
+
+func TestBuildConvertsAuthAndValidations(t *testing.T) {
+	disabled := false
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Shop"},
+		Database:    "postgresql",
+		EntityOrder: []string{"User", "Order"},
+		Entities: map[string]*parser.ParsedEntity{
+			"User": {
+				Name:       "User",
+				NamePlural: "Users",
+				FieldOrder: []string{"id", "email", "password"},
+				Fields: map[string]*parser.ParsedField{
+					"id":       mustParsedField(t, "id", "uuid [primary]"),
+					"email":    mustParsedField(t, "email", "string [required, email]"),
+					"password": mustParsedField(t, "password", "string [required]"),
+				},
+			},
+			"Order": {
+				Name:       "Order",
+				NamePlural: "Orders",
+				FieldOrder: []string{"id", "total", "sku"},
+				Fields: map[string]*parser.ParsedField{
+					"id":    mustParsedField(t, "id", "uuid [primary]"),
+					"total": mustParsedField(t, "total", "decimal [min:0, max:999999]"),
+					"sku":   mustParsedField(t, "sku", "string [max:32]"),
+				},
+			},
+		},
+	}
+	schema.Auth = &parser.AuthConfig{
+		Type:  "jwt",
+		Roles: []string{"Admin", "User"},
+		Endpoints: parser.AuthEndpoints{
+			Register: &disabled,
+		},
+	}
+
+	projectIR, err := Build(schema)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	auth := projectIR.Auth
+	if auth == nil {
+		t.Fatal("auth config missing from IR")
+	}
+	if auth.Entity != "User" {
+		t.Errorf("auth entity = %q, want auto-detected User (email+password)", auth.Entity)
+	}
+	if len(auth.Roles) != 2 || auth.Roles[0] != "Admin" {
+		t.Errorf("roles = %v, want a copy of the declared roles", auth.Roles)
+	}
+	if !auth.Endpoints.HasLogin || !auth.Endpoints.HasMe || !auth.Endpoints.HasSetup {
+		t.Errorf("endpoints default to true, got %+v", auth.Endpoints)
+	}
+	if auth.Endpoints.HasRegister {
+		t.Error("register explicitly disabled but got true")
+	}
+
+	var order *IREntity
+	for i := range projectIR.Entities {
+		if projectIR.Entities[i].Name == "Order" {
+			order = &projectIR.Entities[i]
+		}
+	}
+	if order == nil {
+		t.Fatal("Order missing from IR entities")
+	}
+	total := order.Fields[1]
+	if total.Name != "total" {
+		t.Fatalf("expected total at index 1, got %s", total.Name)
+	}
+	names := map[string]string{}
+	for _, v := range total.Validations {
+		names[v.Name] = v.Value
+	}
+	if names["min"] != "0" || names["max"] != "999999" {
+		t.Errorf("validations = %v, want min=0 and max=999999 converted into the IR", names)
+	}
+}
+
+func TestBuildWithoutAuthYieldsNilAuth(t *testing.T) {
+	schema := &parser.ParsedSchema{
+		Project:     parser.ProjectConfig{Name: "Plain"},
+		Database:    "postgresql",
+		EntityOrder: []string{"Item"},
+		Entities: map[string]*parser.ParsedEntity{
+			"Item": {
+				Name:       "Item",
+				NamePlural: "Items",
+				FieldOrder: []string{"id"},
+				Fields:     map[string]*parser.ParsedField{"id": mustParsedField(t, "id", "uuid [primary]")},
+			},
+		},
+	}
+
+	projectIR, err := Build(schema)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if projectIR.Auth != nil {
+		t.Errorf("auth = %+v, want nil when no auth block is declared", projectIR.Auth)
+	}
+}
