@@ -1,18 +1,16 @@
 # DomainCraft
 
-**Define your domain model once in YAML. Get fully working code for any language.**
+**Define your domain once in YAML. Compile your whole stack — API, web client, admin — from a single source of truth.**
 
-DomainCraft is a domain-driven code generator. You describe your entities, relations, permissions, and business rules in a single `domain.yaml` file, and DomainCraft produces a complete, production-ready project through pluggable **bridge** templates.
+DomainCraft is a domain-driven compiler. You describe entities, relations, permissions and rules in one `domain.yaml`. The tool compiles it into consistent code for every layer through pluggable **bridge** templates. Types, validation, queries, permissions and errors come from the same IR, so layers never drift.
 
 ```yaml
-# domain.yaml -- that's all you write
+# domain.yaml — that's all you write
 project:
   name: MyShop
-
 auth:
   type: jwt
   roles: [Admin, User]
-
 entities:
   Product:
     features: [audit, soft_delete]
@@ -25,53 +23,35 @@ entities:
       read: ["*"]
       create: [Admin]
       update: ["@Owner", Admin]
-      delete: [Admin]
 ```
 
 ```bash
-# That's all you run
-domaincraft generate
+domaincraft generate --bridge csharp-rest
+# → complete, compilable project — entities, repositories, controllers, Docker, k8s
 ```
-
-The output is a complete, compilable project -- entities, repositories, controllers, configurations, Docker setup, everything.
 
 ## Installation
 
-**Go** (any OS):
-
 ```bash
 go install github.com/DomainCraft/DomainCraft/cmd/domaincraft@latest
+# or download a binary from https://github.com/DomainCraft/DomainCraft/releases
 ```
 
-**Or** download the binary for your platform from [Releases](https://github.com/DomainCraft/DomainCraft/releases), rename to `domaincraft` (or `domaincraft.exe` on Windows), and place it anywhere in your PATH.
+## Quick start
 
-**From source** (for contributors):
+**1. Create `domain.yaml`** — by hand or in [Studio](https://domaincraft.github.io/domaincraft-studio/) (visual canvas + Monaco editor, two-way sync).
 
-```bash
-git clone https://github.com/DomainCraft/DomainCraft.git
-cd DomainCraft
-make install
-```
-
-That's it. Run `domaincraft` to get started.
-
-## Quick Start
-
-### Create a new project
-
-Write a `domain.yaml` by hand or with the visual editor. A minimal starter looks like:
+Minimal example:
 
 ```yaml
 project:
   name: My App
   version: 1.0.0
-
 database: postgresql
 auth:
   type: jwt
   roles: [Admin, User]
 api_style: rest
-
 entities:
   User:
     fields:
@@ -81,368 +61,123 @@ entities:
       password: string [required, hidden]
 ```
 
-### Visual editing (DomainCraft Studio)
-
-Prefer a visual editor over raw YAML? **DomainCraft Studio** is a browser-based canvas for designing your domain model — drag-and-drop entity diagrams, an entity inspector, a permission matrix, and a Monaco YAML editor with real-time two-way sync and instant validation. Everything you define in the Studio is a valid `domain.yaml`, so you can save it and run `domaincraft generate` on the result.
-
-- Open the hosted Studio: <https://domaincraft.github.io/domaincraft-studio/>
-- Or run it locally (see [domaincraft-studio](https://github.com/DomainCraft/domaincraft-studio)):
-
-Save (or copy) the resulting `domain.yaml` and generate as usual:
-
-```bash
-domaincraft generate --domain domain.yaml
-```
-
-### Generate code
-
-```bash
-# Interactive -- select bridge from a menu
-domaincraft generate
-
-# Or specify directly
-domaincraft generate --bridge csharp-restful --output ./generated
-
-# Or use a local bridge directory
-domaincraft generate --bridge ../my-bridge --output ./generated
-```
-
-### Validate
+**2. Validate**
 
 ```bash
 domaincraft validate --domain domain.yaml
 ```
 
-## Why This Approach
-
-**The problem:** Every new project starts with the same boilerplate -- CRUD endpoints, database configurations, authentication wiring, validation, permissions. Days of repetitive work that's error-prone and boring.
-
-**The solution:** Describe *what* your domain looks like, not *how* to implement it. DomainCraft translates your domain model into idiomatic code for your target stack, handling all the plumbing automatically.
-
-| Traditional Approach | DomainCraft |
-|---------------------|-------------|
-| Write 50+ files per entity by hand | Define 1 entity in ~10 lines of YAML |
-| Repeat CRUD logic for every project | Generate it consistently every time |
-| Fix bugs in boilerplate across projects | Bugs fixed in templates, fixed everywhere |
-| Switch languages? Rewrite everything | Switch bridges, keep the same domain |
-| Permissions scattered across codebase | Declared alongside entities, wired end-to-end |
-
-## How It Works
-
-```
-domain.yaml --> Parser --> Lexer --> Validator --> IR Builder --> Renderer --> Generated Code
-                                                                    |                 |
-                                                                    +-----> Snapshot <--+
-```
-
-1. **Parser** reads your YAML and builds a structured schema
-2. **Lexer** parses field definitions like `"string [required, max:255]"` into typed objects
-3. **Validator** catches logical errors (missing primary keys, broken relations, invalid configurations)
-4. **IR Builder** creates a fully linked intermediate representation with bidirectional relations
-5. **Renderer** applies bridge templates to the IR and writes files to disk
-6. **Snapshot** persists the domain model + file manifest to `<output>/.domaincraft/snapshot.json`; the next run diffs your updated `domain.yaml` against it so renames and deletions are handled safely (see [Schema Migration](#schema-migration))
-
-The **Intermediate Representation (IR)** is the key design decision. It's a language-agnostic graph of your domain that templates consume. This means the core never needs to know about C#, Java, TypeScript, or any other language -- bridges handle all language-specific concerns.
-
-## What You Can Define
-
-### Fields and Types
-
-```yaml
-# Primitives
-email: string [required, unique, email]
-age: int [optional, gte:0, lte:150]
-price: decimal [required, gte:0, default:0]
-isActive: boolean [default:true]
-createdAt: datetime [default:now()]
-
-# Complex types
-metadata: json
-bio: text
-avatar: url
-ipAddress: ipv4
-tags: array(string)
-```
-
-### Relations
-
-```yaml
-# Many-to-One (most common)
-authorId: relation(User) [required, on_delete:restrict]
-
-# One-to-One (unique)
-profileId: relation(Profile) [unique, on_delete:cascade]
-
-# One-to-Many (declared on the "one" side)
-items: relation(OrderItem) [many]
-
-# Many-to-Many (declared on either side)
-tags: relation(Tag) [many]
-
-# Self-referential
-parentId: relation(Category) [optional, on_delete:set_null]
-```
-
-### Delete Behaviors
-
-```yaml
-cascade     # Delete dependents when parent is deleted
-set_null    # Set FK to NULL (requires [optional])
-restrict    # Block parent deletion if dependents exist
-no_action   # Let the database handle it
-```
-
-### Entity Features (Auto-injected Fields)
-
-```yaml
-features:
-  - audit              # createdAt, updatedAt
-  - audit_log          # createdBy, updatedBy (uuid)
-  - soft_delete         # deletedAt (nullable datetime)
-  - optimistic_lock     # version (int, concurrency control)
-```
-
-### Permissions (RBAC + ABAC)
-
-```yaml
-permissions:
-  read: ["*"]                    # Public
-  create: [User, Admin]          # Role-based
-  update: ["@Owner", Admin]      # Ownership-based
-  delete: [Admin]                # Admin-only
-```
-
-### Indexes
-
-```yaml
-indexes:
-  - fields: [categoryId, status]
-    type: btree
-  - fields: [slug]
-    unique: true
-```
-
-### Seed Data
-
-```yaml
-seed:
-  - { name: "Electronics", slug: "electronics", isActive: true }
-  - { name: "Books", slug: "books", isActive: true }
-```
-
-## Schema Migration
-
-DomainCraft tracks the *history of your domain model*, not the generated code. After every `domaincraft generate` it stores a snapshot at `<output>/.domaincraft/snapshot.json`. When you change `domain.yaml` and generate again, it diffs the two versions and handles the consequences:
-
-- **Renamed entities** — add `old_name` to tell DomainCraft an entity was renamed (not deleted + recreated):
-
-  ```yaml
-  entities:
-    Item:
-      old_name: Product   # rename hint
-      fields: ...
-  ```
-
-- **Deleted entities** — orphaned generated files are removed; developer-owned files (`overwrite: false`) are shown in an interactive prompt.
-- **Field type changes** — a "manual refactoring" report lists the changed fields and files that may need fixes.
-
-Run with `--prune` to apply all cleanup automatically without prompts (CI-friendly):
+**3. Generate**
 
 ```bash
-domaincraft generate --prune
+domaincraft generate --bridge csharp-rest --output ./generated
+domaincraft generate --bridge react-rest   --output ./frontend  # same model, typed client
 ```
 
-Without `--prune`, non-interactive runs only print warnings and keep the previous snapshot, so a later `--prune` run can still find the orphaned files.
+Run the API: `cd generated && dotnet run --project src/WebApi`
 
-## Bridge System
-
-A **bridge** is a directory containing Go templates and configuration that tells DomainCraft how to generate code for a specific language and framework. Bridges are completely decoupled from the core -- you can create your own without modifying any Go code.
-
-**Day-2 safety:** bridge templates may declare `overwrite: false` to scaffold a file only once. That file is developer-owned and survives every regeneration — combine it with interfaces or `partial`/base classes so generated logic is always refreshed while your custom code stays put (the C# bridge ships this **Generation Gap** pattern: regenerated `partial` services with `OnBeforeCreate/Update/Delete` hooks plus a scaffold-once custom partial). The migration engine protects these files when entities are renamed or deleted.
-
-### Available Bridges
-
-| Bridge | Language/Framework | Status |
-|--------|-------------------|--------|
-| [csharp-restful](https://github.com/DomainCraft/domaincraft-bridge-csharp) | C# / ASP.NET Core / EF Core / PostgreSQL | Ready |
-| domaincraft-bridge-java | Java / Spring Boot | Planned |
-| domaincraft-bridge-typescript | TypeScript / Express / Prisma | Planned |
-
-List installed and available bridges:
+Swap a layer without forking 71 templates:
 
 ```bash
-domaincraft bridges
+domaincraft generate --bridge csharp-rest --replace persistence=csharp-dapper
 ```
 
-### Use a Bridge
+## Why this approach
+
+| Hand-written | DomainCraft |
+|---|---|
+| 50+ files per entity by hand | 1 entity in ~10 lines of YAML |
+| CRUD repeated per project | Generated consistently |
+| Bugs fixed in every copy | Fixed in the template, fixed everywhere |
+| New language = rewrite | New bridge, same domain |
+| Permissions scattered | Declared with entities, wired end-to-end |
+
+You describe *what* the domain looks like, not *how* to implement it.
+
+## How it works
+
+```
+domain.yaml → Parser → Lexer → Validator → IR Builder → Renderer → Generated Code
+                                                      → Snapshot (.domaincraft/snapshot.json)
+```
+
+The **IR** is the contract. It's language-agnostic — the Go core never contains C# or TypeScript — and every bridge renders from it. Two runs on the same `domain.yaml` produce byte-identical output.
+
+See [Architecture](https://domaincraft.github.io/domaincraft-site/docs/concepts/architecture/) for the full pipeline.
+
+## What you can define
+
+Fields: `string`, `int`, `bigint`, `float`, `decimal`, `boolean`, `date`, `datetime`, `uuid`, `text`, `json`/`jsonb`, `enum(Name)`, `array(Type)` — with traits `primary`, `required`, `unique`, `hidden`, `readonly`, `optional`, validations `min`/`max`/`email`/`url`/`ipv4`/`regex`/`gte`/`lt`, defaults `default:0`/`now()`/`uuid()` and `on_delete: cascade|set_null|restrict|no_action`.
+
+Features: `audit` (`createdAt`/`updatedAt`), `audit_log` (`createdBy`/`updatedBy`), `soft_delete` (`deletedAt`), `optimistic_lock` (`version` → `409 Conflict`) — plus `event_sourced`/`cacheable`.
+
+Permissions: `read`/`create`/`update`/`delete` with `*` (public), role names (RBAC) and `@Owner` (ABAC). `when:` in `bridge.yaml` gates templates on `hasAuth`/`hasSeed`/`hasAddon:dapr`.
+
+Full language: [domain.yaml reference](https://domaincraft.github.io/domaincraft-site/docs/reference/language/)
+
+## Axes, layers and replacement
+
+One bridge = **one layer in one axis**. A layer is declared in `bridge.yaml` (`layer: domain|persistence|transport` for C#, `core|framework|offline` for web/mobile — open `^[a-z][a-z0-9_]*$`, duplicate `layer` in one chain fails).
+
+```
+backend (C#):  domain (core) → persistence (efcore/dapper) → transport (rest/grpc)
+web:           core (ts-core) → framework (react/vue)
+mobile:        core (dart-core) → framework (flutter) → offline (drift)
+```
+
+`extends: <base>` builds a linear chain (path / registry ID / `owner/repo`). `--replace` swaps one edge without forking:
 
 ```bash
-# By registry ID (auto-downloads and caches)
-domaincraft generate --bridge csharp-restful
-
-# By local path
-domaincraft generate --bridge ./my-bridge
-
-# By GitHub shorthand
-domaincraft generate --bridge DomainCraft/domaincraft-bridge-csharp
+--replace persistence=dapper        → core+dapper+rest
+--replace transport=grpc            → core+efcore+grpc
+# N×M = N+M repos, not N×M: 10×10=100 → 21 repos (1 core+10+10), 30×30=900 →61
 ```
 
-Bridges from the registry are downloaded once and cached in `~/.domaincraft/bridges/`; later runs use the cache instead of re-downloading.
+`1000` bridges stay `1000` repos, not the product. See [Axes and layers](https://domaincraft.github.io/domaincraft-site/docs/concepts/three-axes/).
 
-### Bridge Caching & Updates
+## Bridges
 
-Downloaded bridges are cached locally, so generating again never re-clones the repository. DomainCraft also keeps them **fresh**: it periodically checks each cached bridge against its GitHub repo and tells you when a newer version is available.
-
-- **How it works:** every cached bridge carries a small metadata file (`.domaincraft-meta.json`) recording its source, `bridge.yaml` version, git commit, and the last time the remote was checked. Updates are detected through the GitHub REST API — no re-clone or re-download just to check. Detection is GitHub-only, since a bridge specified as a local path is always used fresh.
-- **Automatic:** in interactive mode you'll be prompted to update when a newer version exists; non-interactive runs keep the cached copy and print a warning.
-- **Force an update (CI-safe, no prompts):**
-
-  ```bash
-  domaincraft generate --update-bridges
-  ```
-
-- **Inspect update availability without generating:**
-
-  ```bash
-  domaincraft bridges --check-updates
-  ```
-
-- **Offline-safe:** if the remote is unreachable or `git` is missing, generation simply uses the cached copy — a failed update check never blocks you.
-- **Package versions too:** resolved NuGet package versions are cached per bridge in `~/.domaincraft/cache/<bridge>/packages.json` (TTL 24h), so regenerating doesn't hit the package registry every time — and each bridge keeps its own cache as more bridges ship.
-
-### Create Your Own Bridge
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for a complete step-by-step guide on creating bridges for any language.
-
-### Bridge Certification (Compliance Suite)
-
-`compliance-suite/` contains the **Technology Compatibility Kit (TCK)** — a hand-written, language-agnostic test suite that verifies a bridge implements the DomainCraft contract correctly:
-
-| File | Purpose |
-|------|---------|
-| `kitchen-sink.yaml` | A maximal domain model exercising every core feature: all field types, enums, relations (incl. 1:1 and many-to-many), features, permissions with `@Owner`, indexes, seed data, auth, jsonb, versioning, rate limiting |
-| `suite.js` | A [k6](https://k6.io) script that runs against the *generated* app over HTTP and asserts the full contract: status codes (200/201/204/400/401/403/404/409/429), role-based access, `@Owner` isolation, hidden/readonly fields, optimistic-lock concurrency, seed data, validation errors |
-| `certification.yml` | A ready-to-copy **GitHub Actions workflow for bridge repositories** — downloads the core, generates from `kitchen-sink.yaml` with your bridge, starts the app via Docker Compose, runs `suite.js` |
-
-**Certify your bridge:** copy `compliance-suite/certification.yml` into `<your-bridge>/.github/workflows/certification.yml` (adjust `bridge_path` if templates aren't at the repo root). The suite is maintained in the core, so every new check is automatically inherited by all certified bridges.
-
-**Run locally:**
+| ID | Layer | Targets |
+|---|---|---|
+| `csharp-core` | `domain` | Domain + Application |
+| `csharp-efcore` | `persistence` — `extends: csharp-core` | EF Core + PostgreSQL + `migrations:` |
+| `csharp-rest` | `transport` — `extends: csharp-efcore` | ASP.NET REST + JWT + k8s/tests |
+| `csharp-restful` | — | *Archived* monolith (71 files) — use `csharp-rest` (byte-identical) |
+| `ts-core` | `core` | TypeScript data layer (types, Zod, query DSL, permissions) |
+| `react-rest` | `framework` — `extends: ts-core` | TanStack Query + auth |
+| `appwrite` | — | Appwrite TablesDB (`appwrite.config.json`) |
+| `admin-alpine` | — | Static admin (`--admin`) |
 
 ```bash
-cd DomainCraft
-go build -o bin/domaincraft ./cmd/domaincraft
-./bin/domaincraft generate --domain compliance-suite/kitchen-sink.yaml --bridge ../domaincraft-bridge-csharp --output /tmp/tck-app --non-interactive
-cd /tmp/tck-app && docker compose up -d --build
-k6 run -e API_URL=http://localhost:9000 ../DomainCraft/compliance-suite/suite.js
+domaincraft generate --bridge csharp-rest
+domaincraft generate --bridge csharp-rest --replace persistence=csharp-dapper
+domaincraft bridges --check-updates
 ```
 
-The suite is re-run tolerant (unique skus/order numbers per run, 201-or-409 tolerances), so a second run against a non-reset database stays green.
+Bridges are cached in `~/.domaincraft/bridges/` and `~/.domaincraft/cache/` (24h TTL). Full registry: [Bridges](https://domaincraft.github.io/domaincraft-site/docs/reference/bridges/).
 
-> **Why hand-written?** The suite is an *independent oracle* — written by humans against the contract. If it were generated from the same IR as the bridge's code, a bridge bug would reproduce itself in the test. Trust the core (unit-tested, deterministic); verify the bridge against it.
-
-## Project Structure
+## CLI
 
 ```
-DomainCraft/
-├── cmd/
-│   ├── domaincraft/         # CLI entry point (Cobra): validate, generate, bridges, update
-│   ├── schema-gen/          # JSON schema generator for IDE autocomplete
-│   └── wasm-validator/      # Go WASM entry point exposing the validator + spec to the GUI
-├── internal/
-│   ├── parser/              # YAML parsing -> ParsedSchema
-│   ├── lexer/               # Field string parsing -> FieldDefinition
-│   ├── validator/           # Logical consistency checks
-│   ├── ir/                  # Intermediate Representation builder
-│   ├── renderer/            # Template rendering engine + file manifest
-│   ├── snapshot/            # Schema snapshot / migration engine
-│   ├── bridge/              # Bridge registry, resolver, cache & update checks
-│   ├── packages/            # Package version registry resolution (TTL-cached)
-│   ├── specmeta/            # Single source of truth for allowed types/features/databases
-│   ├── interactive/         # Interactive CLI prompts (huh)
-│   └── testutil/            # Shared test helpers
-├── scripts/
-│   └── install.sh           # One-liner installer
-├── pkg/
-│   ├── logger/              # Console output formatting
-│   └── textutil/            # Identifier splitting, snake_case column names
-├── spec/
-│   └── domain.schema.json   # JSON Schema for domain.yaml (auto-generated)
-├── examples/
-│   └── domain.yaml          # E-commerce example
-├── Makefile
-└── CONTRIBUTING.md
+domaincraft generate --domain domain.yaml --bridge csharp-rest --output ./generated
+domaincraft validate --domain domain.yaml
+domaincraft bridges --check-updates
+domaincraft update --check
 ```
 
-## CLI Reference
+Flags: `--domain`/`-d`, `--bridge`/`-b`, `--output`/`-o`, `--admin`, `--replace left=right` (repeatable), `--prune`/`--migrate` (schema), `--addons dapr`, `--non-interactive`. See [CLI reference](https://domaincraft.github.io/domaincraft-site/docs/reference/cli/).
 
-```
-domaincraft generate       # Generate code from domain.yaml
-domaincraft validate       # Validate domain.yaml
-domaincraft bridges        # List available bridges
-domaincraft update         # Update the domaincraft core to the latest release
-domaincraft update --check # Report whether a newer core version exists (no download)
-domaincraft --version      # Print the CLI version
+## Migration
 
-# Flags
---domain, -d      Path to domain.yaml (default: domain.yaml)
---bridge, -b      Bridge ID, path, or owner/repo
---output, -o      Output directory (default: generated)
---admin           Generate an admin panel (optional bridge ID, default: admin-alpine; generate only)
---addons          Infrastructure accelerators (comma-separated, e.g. "dapr")
---prune           Apply migration cleanup automatically without prompts (CI; generate only)
---migrate         Run the bridge's database-migration commands after generation (generate only)
---update-bridges  Download newer versions of cached bridges before generating (no prompts, CI)
---check-updates   Report outdated cached bridges (bridges only)
---non-interactive  Disable interactive prompts (CI/scripts)
-```
+The IR + manifest is saved to `.domaincraft/snapshot.json`. On the next run renames (`old_name: Product`) become `RenameTable`/`RenameColumn` (data kept), deletions show a prompt, type changes print a report. `--prune` applies renames/deletions and rewrites identifiers in `overwrite: false` files and runs `migrations:` best-effort. See [Migrations](https://domaincraft.github.io/domaincraft-site/docs/guides/migrations/) and [Generation Gap](https://domaincraft.github.io/domaincraft-site/docs/concepts/generation-gap/).
 
-## For Developers
+## Certification (TCK)
 
-If you want to work on DomainCraft itself:
+`DomainCraft/compliance-suite/` is the hand-written oracle. `kitchen-sink.yaml` (maximal domain) + `suite.js` (k6 over HTTP) — copy `certification.yml` to your bridge repo. TypeScript has its own `ts-core/tck/`. See [Certification](https://domaincraft.github.io/domaincraft-site/docs/guides/certification/).
 
-```bash
-git clone https://github.com/DomainCraft/DomainCraft.git
-cd DomainCraft
-make build          # Build binary to bin/domaincraft
-make test           # Run all tests
-make lint           # go vet
-make fmt            # gofmt
-```
+## Contributing
 
-### Programmatic Usage
-
-```go
-package main
-
-import (
-    "os"
-    "domaincraft/internal/parser"
-)
-
-func main() {
-    data, _ := os.ReadFile("domain.yaml")
-    schema, _ := parser.ParseYAML(data)
-
-    for _, entityName := range schema.EntityOrder {
-        entity := schema.Entities[entityName]
-        println("Entity:", entity.Name, "->", entity.NamePlural)
-
-        for _, fieldName := range entity.FieldOrder {
-            field := entity.Fields[fieldName]
-            println("  -", field.Name, ":", field.Type)
-        }
-    }
-}
-```
-
-## Full Example
-
-See [`examples/domain.yaml`](./examples/domain.yaml) for a complete e-commerce domain with:
-- 9 entities (User, Product, Category, Order, OrderItem, Tag, Review, Document, Folder)
-- Enums, self-referential relations, many-to-many
-- All feature types (audit, soft_delete, optimistic_lock)
-- Complex RBAC permissions with ownership
-- Composite indexes, seed data
+See [CONTRIBUTING.md](./CONTRIBUTING.md) — `make build` / `make test` / `make lint`, bridge anatomy, `overwrite: false` and snapshot rules. For the full guide on writing a bridge: [Writing a bridge](https://domaincraft.github.io/domaincraft-site/docs/guides/writing-a-bridge/).
 
 ## License
 
