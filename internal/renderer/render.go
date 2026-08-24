@@ -234,15 +234,40 @@ func (r *Renderer) shouldRenderContext(spec TemplateSpec, context RenderContext)
 
 // resolvePackages resolves all package versions from the package registry,
 // cached per bridge so repeated runs don't hit the registry every time.
+// When the renderer is composed (extends chain), registry_packages from all
+// bridges are merged base-first so inner layers can declare their own
+// dependencies; the adapter's values win on conflicts.
 func (r *Renderer) resolvePackages() map[string]string {
-	cfg := r.config()
-	if len(cfg.RegistryPackages) == 0 {
+	// Merge registry_packages from all sources in the chain (base-first,
+	// adapter wins on conflicts — consistent with type_mappings merge).
+	merged := make(map[string]string)
+	for _, src := range r.sources {
+		for k, v := range src.config.RegistryPackages {
+			merged[k] = v
+		}
+	}
+	if len(merged) == 0 {
 		return nil
 	}
 
-	result := make(map[string]string, len(cfg.RegistryPackages))
-	for key, packageID := range cfg.RegistryPackages {
-		version, err := packages.ResolveVersionCached(r.cacheNamespace(), cfg.RegistryURL, packageID)
+	// Use the adapter's registry_url; fall back to any source with one.
+	registryURL := r.config().RegistryURL
+	if registryURL == "" {
+		for i := len(r.sources) - 1; i >= 0; i-- {
+			if r.sources[i].config.RegistryURL != "" {
+				registryURL = r.sources[i].config.RegistryURL
+				break
+			}
+		}
+	}
+	if registryURL == "" {
+		r.log.Warn("no registry_url configured in any bridge in the chain; skipping package resolution")
+		return nil
+	}
+
+	result := make(map[string]string, len(merged))
+	for key, packageID := range merged {
+		version, err := packages.ResolveVersionCached(r.cacheNamespace(), registryURL, packageID)
 		if err != nil {
 			r.log.Warn("failed to resolve package %s: %v", packageID, err)
 			continue
