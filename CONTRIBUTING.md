@@ -6,7 +6,7 @@ Full docs: [https://domaincraft.github.io/domaincraft-site/docs/](https://domain
 
 ## Quick start
 
-**Prerequisites:** Go 1.25+, Git
+**Prerequisites:** Go 1.27+, Git
 
 ```bash
 git clone https://github.com/DomainCraft/DomainCraft.git
@@ -23,9 +23,11 @@ make cli-generate DOMAIN=examples/domain.yaml BRIDGE=../domaincraft-bridge-cshar
 # direct:
 go run ./cmd/domaincraft validate --domain domain.yaml
 go run ./cmd/domaincraft generate --domain domain.yaml --bridge ../my-bridge --output ./out
+# swap a layer without forking:
+go run ./cmd/domaincraft generate --domain domain.yaml --bridge ../domaincraft-bridge-csharp-rest --replace persistence=../my-dapper --output ./out
 ```
 
-`--bridge` accepts a local path, a registry ID (`csharp-rest`, `ts-core`) or `owner/repo`. Create a starter `domain.yaml` by hand or in [Studio](https://domaincraft.github.io/domaincraft-studio/) — an example is `examples/domain.yaml`.
+`--bridge` accepts a local path, a registry ID (`csharp-rest`, `ts-core`) or `owner/repo`. `--replace` accepts `layer=bridgeRef` or `bridgeId=bridgeRef` (repeatable). Create a starter `domain.yaml` by hand or in [Studio](https://domaincraft.github.io/domaincraft-studio/) — an example is `examples/domain.yaml`.
 
 ## Architecture
 
@@ -34,7 +36,7 @@ domain.yaml → Parser → Lexer → Validator → IR Builder → Renderer → G
                                                       → Snapshot (.domaincraft/snapshot.json)
 ```
 
-The **IR** is the contract. Templates read a fully linked `IRProject` — the core never contains C# or TypeScript. See [Architecture](https://domaincraft.github.io/domaincraft-site/docs/concepts/architecture/).
+The **IR** is the contract. Templates read a fully linked `IRProject` — the core never contains C# or TypeScript. Composition is `extends` + `layer` + `--replace` (see [Axes and layers](https://domaincraft.github.io/domaincraft-site/docs/concepts/three-axes/) and [Architecture](https://domaincraft.github.io/domaincraft-site/docs/concepts/architecture/)).
 
 ## Creating a new bridge
 
@@ -114,9 +116,11 @@ Available in templates: `.Project`, `.Entity`, `.Bridge`, `.Packages` — with I
 ```bash
 go run ./cmd/domaincraft generate --domain examples/domain.yaml --bridge ./my-bridge --output ./test-output
 # then compile/lint the output in your target language
+# for a layered bridge, test the composition and a replacement:
+go run ./cmd/domaincraft generate --domain examples/domain.yaml --bridge ../domaincraft-bridge-csharp-rest --replace persistence=./my-bridge --output ./test-output
 ```
 
-Add a CI job that generates from `examples/domain.yaml` and compiles the result.
+Add a CI job that generates from `examples/domain.yaml` (and `compliance-suite/kitchen-sink.yaml` for the TCK) and compiles the result. See [Certification](https://domaincraft.github.io/domaincraft-site/docs/guides/certification/).
 
 ## Snapshot and migrations
 
@@ -132,13 +136,14 @@ See [Migrations](https://domaincraft.github.io/domaincraft-site/docs/guides/migr
 
 * Keep the Go core language-agnostic — no C# / TypeScript in `internal/renderer`.
 * DRY via `specmeta` — don't duplicate type/feature sets.
-* Deterministic output — `sort.Strings` every `map` that affects files.
+* Deterministic output — every map or set that affects files is iterated in sorted order via `slices.Sorted(maps.Keys(...))`, `slices.Sort` or `slices.SortFunc` with `cmp.Compare` (no raw `range` over maps). Two runs on the same `domain.yaml` produce identical bytes.
 * Update docs and tests with code.
 
 ## Review checklist for bridge PRs
 
-* `bridge.yaml` lists every file with correct `for:`/`when:`/`overwrite:`.
+* `bridge.yaml` lists every file with correct `for:`/`when:`/`overwrite:` and `layer` (if layered) matches `^[a-z][a-z0-9_]*$` with no duplicate `layer` in the composed chain.
 * `type_mappings.yaml` covers every IR type for the target.
-* Output compiles for `examples/domain.yaml`.
+* Output compiles for `examples/domain.yaml` (and `compliance-suite/kitchen-sink.yaml` for the TCK).
 * `overwrite: false` only for scaffold-once files.
 * `--prune` after a rename/delete cleans only the right files (check `.domaincraft/snapshot.json`).
+* Deterministic output — two runs produce identical bytes (every map/set that affects files is iterated via `slices.Sorted` / `slices.Sort` / `slices.SortFunc` with `cmp.Compare`, no raw `range` over maps).

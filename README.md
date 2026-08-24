@@ -130,7 +130,7 @@ mobile:        core (dart-core) → framework (flutter) → offline (drift)
 ```bash
 --replace persistence=dapper        → core+dapper+rest
 --replace transport=grpc            → core+efcore+grpc
-# N×M = N+M repos, not N×M: 10×10=100 → 21 repos (1 core+10+10), 30×30=900 →61
+# N×M = N+M repos, not N×M: 10×10=100 → 22 repos (1 core + 1 domain + 10+10), 30×30=900 → 62
 ```
 
 `1000` bridges stay `1000` repos, not the product. See [Axes and layers](https://domaincraft.github.io/domaincraft-site/docs/concepts/three-axes/).
